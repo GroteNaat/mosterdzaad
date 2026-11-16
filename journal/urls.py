@@ -1,0 +1,30 @@
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('', views.dashboard, name='home'),
+    path('tracker/', views.tracker, name='tracker'),
+    path('tracker/<str:code>/', views.book_detail, name='book'),
+    path('notities/', views.notes, name='notes'),
+    path('notities/nieuw/', views.note_edit, name='note-new'),
+    path('notities/<int:pk>/', views.note_detail, name='note-detail'),
+    path('notities/<int:pk>/bewerken/', views.note_edit, name='note-edit'),
+    path('bundels/', views.bundles, name='bundles'),
+    path('leesplannen/', views.plans, name='plans'),
+    path('leesplannen/nieuw/', views.plan_new, name='plan-new'),
+    path('leesplannen/<int:pk>/', views.plan_detail, name='plan-detail'),
+    path('leesplannen/<int:pk>/bewerken/', views.plan_edit, name='plan-edit'),
+    path('studies/', views.studies, name='studies'),
+    path('studies/nieuw/', views.study_edit, name='study-new'),
+    path('studies/<int:pk>/', views.study_detail, name='study-detail'),
+    path('studies/<int:pk>/bewerken/', views.study_edit, name='study-edit'),
+    path('themas/', views.themes, name='themes'),
+    path('themas/<int:pk>/', views.theme_detail, name='theme-detail'),
+    path('themas/<int:pk>/bewerken/', views.theme_edit, name='theme-edit'),
+    path('groepen/', views.groups, name='groups'),
+    path('groepen/<int:pk>/bewerken/', views.group_edit, name='group-edit'),
+    path('instellingen/', views.settings, name='settings'),
+    path('export/', views.export, name='export'),
+    path('verwijderen/<str:kind>/<int:pk>/', views.delete, name='delete'),
+    path('health/', views.health, name='health'),
+]

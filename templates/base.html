@@ -1,0 +1,36 @@
+{% load static %}<!doctype html>
+<html lang="nl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="Mosterdzaad — jouw persoonlijke plek voor Bijbelstudie, notities en groei."><title>{% block title %}Mosterdzaad{% endblock %}</title><link rel="icon" href="{% static 'seed.svg' %}" type="image/svg+xml"><link rel="stylesheet" href="{% static 'app.css' %}"><script src="{% static 'vendor/htmx.min.js' %}" defer></script><script src="{% static 'app.js' %}" defer></script></head>
+<body>
+<a class="skip-link" href="#main">Naar inhoud</a>
+<svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+<symbol id="i-seed" viewBox="0 0 24 24"><path d="M12 21V11M12 15C4 15 3 10 3 5c6 0 9 3 9 10ZM12 11c0-6 3-9 9-9 0 6-3 9-9 9Z"/></symbol>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v11H3ZM9 21v-8h6v8"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5v16M12 5C8 2 4 3 2 4v15c3-1 6-1 10 2 4-3 7-3 10-2V4c-3-1-6-2-10 1Z"/></symbol>
+<symbol id="i-note" viewBox="0 0 24 24"><path d="M14 3H4v18h16V11M8 16l1-5 9-9 4 4-9 9ZM16 4l4 4"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+<symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 2v6M17 2v6M3 11h18M7 15h3M14 15h3"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M2 22v-3a7 7 0 0 1 14 0v3M17 3a4 4 0 0 1 0 8M19 15a5 5 0 0 1 3 5v2"/></symbol>
+<symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 3h8l10 10-8 8L3 11Z"/><circle cx="7.5" cy="7.5" r="1"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></symbol>
+</defs></svg>
+<aside class="sidebar">
+<a class="brand" href="{% url 'home' %}"><span class="brand-mark"><svg><use href="#i-seed"/></svg></span><span>mosterdzaad<small>RUIMTE VOOR GROEI</small></span></a>
+<div class="nav-label">MIJN STUDIEPLEK</div>
+<nav aria-label="Hoofdnavigatie">
+<a href="{% url 'home' %}" {% if active == 'home' %}aria-current="page"{% endif %}><svg><use href="#i-home"/></svg>Overzicht</a>
+<a href="{% url 'tracker' %}" {% if active == 'tracker' %}aria-current="page"{% endif %}><svg><use href="#i-book"/></svg>Bijbeltracker</a>
+<a href="{% url 'plans' %}" {% if active == 'plans' %}aria-current="page"{% endif %}><svg><use href="#i-calendar"/></svg>Leesplannen</a>
+<a href="{% url 'studies' %}" {% if active == 'studies' %}aria-current="page"{% endif %}><svg><use href="#i-users"/></svg>Bijbelstudies</a>
+<a href="{% url 'notes' %}" {% if active == 'notes' %}aria-current="page"{% endif %}><svg><use href="#i-note"/></svg>Notities</a>
+<a href="{% url 'bundles' %}" {% if active == 'bundles' %}aria-current="page"{% endif %}><svg><use href="#i-grid"/></svg>Bundels</a>
+<a href="{% url 'themes' %}" {% if active == 'themes' %}aria-current="page"{% endif %}><svg><use href="#i-tag"/></svg>Thema’s</a>
+</nav>
+<div class="sidebar-bottom"><div class="sidebar-thought"><span class="tiny-seed">✦</span><p>Kleine momenten.<br>Diepe wortels.</p><small>Open je Bijbel. Neem de tijd.</small></div><a class="settings-link" href="{% url 'settings' %}" {% if active == 'settings' %}aria-current="page"{% endif %}><svg><use href="#i-settings"/></svg>Instellingen</a><small class="personal">Jouw persoonlijke studieplek</small></div>
+</aside>
+<div class="workspace"><header class="topbar"><span>Een moment voor het Woord</span><span class="date">{% now 'j F Y' %}</span></header>
+<main id="main" tabindex="-1">
+{% if messages %}<div class="messages" role="status">{% for message in messages %}<div class="message {{ message.tags }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+{% block content %}{% endblock %}
+</main><footer>mosterdzaad <span>·</span> Lees in je Bijbel. Bewaar hier wat groeit.</footer></div>
+</body></html>

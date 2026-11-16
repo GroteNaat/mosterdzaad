@@ -1,0 +1,92 @@
+name: Testen en Docker-image
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: mosterdzaad
+          POSTGRES_USER: mosterdzaad
+          POSTGRES_PASSWORD: test-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U mosterdzaad"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SECRET_KEY: ci-only-secret-not-for-production
+      POSTGRES_HOST: localhost
+      POSTGRES_PASSWORD: test-only-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python manage.py collectstatic --noinput
+      - run: python manage.py check
+      - run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py test
+  container:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build voor rooktest
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mosterdzaad:smoke
+      - name: Start volledige installatie en test
+        env:
+          SECRET_KEY: smoke-only-secret-not-for-production
+          POSTGRES_PASSWORD: smoke-only-password
+        run: |
+          docker tag mosterdzaad:smoke ghcr.io/grotenaat/mosterdzaad:local
+          docker compose up -d --no-build --wait --wait-timeout 120
+          curl --fail http://127.0.0.1:8000/health/
+          curl --fail http://127.0.0.1:8000/tracker/ > /dev/null
+      - name: Logs bij fout
+        if: failure()
+        run: docker compose logs
+        env:
+          SECRET_KEY: smoke-only-secret-not-for-production
+          POSTGRES_PASSWORD: smoke-only-password
+      - name: Inloggen bij GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image-labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/grotenaat/mosterdzaad
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha
+      - name: Publiceren na geslaagde controles
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

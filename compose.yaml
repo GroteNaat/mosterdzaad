@@ -1,0 +1,45 @@
+name: mosterdzaad
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mosterdzaad
+      POSTGRES_USER: mosterdzaad
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Vul POSTGRES_PASSWORD in .env in}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mosterdzaad -d mosterdzaad"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  app:
+    image: ghcr.io/grotenaat/mosterdzaad:${APP_VERSION:-local}
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8000}:8000"
+    environment:
+      DEBUG: "false"
+      SECRET_KEY: ${SECRET_KEY:?Vul SECRET_KEY in .env in}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
+      HTTPS: ${HTTPS:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      POSTGRES_HOST: db
+      POSTGRES_DB: mosterdzaad
+      POSTGRES_USER: mosterdzaad
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Vul POSTGRES_PASSWORD in .env in}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  postgres_data:
