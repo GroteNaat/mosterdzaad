@@ -37,24 +37,47 @@ De eerste start bouwt de app en maakt automatisch de databasetabellen aan. Postg
 
 ### Toegang vanaf je computer
 
-Standaard luistert de app alleen op de Ubuntu-server (`127.0.0.1:8000`). Maak vanaf je eigen computer een SSH-tunnel:
+De webapp publiceert standaard **poort 8000 op alle IPv4-netwerkinterfaces** van je Docker-host (`0.0.0.0:8000:8000`). Open vanaf een apparaat op je thuisnetwerk:
 
-```sh
-ssh -L 8000:127.0.0.1:8000 jouw-gebruiker@jouw-server
+```text
+http://<LAN-IP-van-je-server>:8000
 ```
 
-Open vervolgens **http://localhost:8000** op je computer. Hiervoor zijn geen wijzigingen aan `.env` nodig.
+Bijvoorbeeld `http://192.168.1.20:8000`. Je kunt ook de lokale hostnaam van je server gebruiken als je netwerk die naam kan vinden. Er is geen SSH-tunnel nodig. PostgreSQL krijgt geen gepubliceerde poort en blijft binnen het Docker-netwerk.
 
-Voor toegang binnen je eigen netwerk of via je eigen VPN zet je in `.env` bijvoorbeeld:
+Deze standaardwaarden staan in `.env.example`:
 
 ```dotenv
-BIND_ADDRESS=192.168.1.20
-ALLOWED_HOSTS=localhost,127.0.0.1,192.168.1.20
+BIND_ADDRESS=0.0.0.0
+PORT=8000
+ALLOWED_HOSTS=*
 ```
 
-Vervang het voorbeeld-IP door het daadwerkelijke lokale IP van je server en voer `docker compose up -d` uit. Open `http://192.168.1.20:8000`. Geen accounts betekent dat iedereen die de app kan bereiken alle inhoud kan lezen, aanpassen en exporteren. Publiceer deze poort niet op internet. Let erop dat Docker gepubliceerde poorten UFW-regels kunnen omzeilen; bind daarom aan het gewenste lokale/VPN-adres en controleer bereikbaarheid.
+Is poort 8000 al in gebruik? Verander `PORT` bijvoorbeeld naar `8085`, voer `docker compose up -d` uit en open `http://192.168.1.20:8085`. De interne containerpoort blijft 8000.
 
-Bij een eigen HTTPS-proxy: voeg de hostnaam aan `ALLOWED_HOSTS` toe, zet `CSRF_TRUSTED_ORIGINS=https://jouw-hostnaam`, `HTTPS=true` en `TRUST_PROXY=true`. Die laatste optie alleen gebruiken als de proxy de `X-Forwarded-Proto`-header zelf betrouwbaar overschrijft. Laat `127.0.0.1` in `ALLOWED_HOSTS` staan voor de healthcheck. Alleen `/health/` is uitgezonderd van de HTTPS-doorverwijzing voor de lokale containercontrole; dit endpoint bevat geen persoonlijke inhoud.
+`ALLOWED_HOSTS=*` accepteert iedere servernaam zodat zowel je server-IP als lokale hostnaam direct werkt. Het is geen toegangsfilter voor apparaten. Wil je servernamen beperken, gebruik dan bijvoorbeeld `ALLOWED_HOSTS=localhost,127.0.0.1,192.168.1.20,homelab.local` met je eigen IP/hostnaam. Je kunt `BIND_ADDRESS` ook op je specifieke LAN-IP zetten om uitsluitend die netwerkinterface te gebruiken, of op `127.0.0.1` voor toegang vanaf alleen de server.
+
+Mosterdzaad heeft geen accounts: iedereen die de app kan bereiken kan alle inhoud lezen, aanpassen en exporteren. Deze standaard is bedoeld voor je vertrouwde thuisnetwerk. Gebruik geen router-portforwarding naar deze poort; op een server met een publiek netwerkadres bind je aan het LAN-IP. Docker-gepubliceerde poorten kunnen UFW-regels omzeilen.
+
+Bij een eigen HTTPS-proxy: neem de hostnaam op in `ALLOWED_HOSTS` als je die lijst hebt beperkt, zet `CSRF_TRUSTED_ORIGINS=https://jouw-hostnaam`, `HTTPS=true` en `TRUST_PROXY=true`. Die laatste optie alleen gebruiken als de proxy de `X-Forwarded-Proto`-header zelf betrouwbaar overschrijft. Behoud bij een beperkte hostlijst `127.0.0.1` voor de healthcheck. Alleen `/health/` is uitgezonderd van de HTTPS-doorverwijzing voor de lokale containercontrole; dit endpoint bevat geen persoonlijke inhoud.
+
+### Bestaande installatie vanaf je thuisnetwerk bereikbaar maken
+
+Een bestaande `.env` wordt bij een update niet overschreven. Had je de vorige standaardinstellingen overgenomen, wijzig dan **beide** regels in je bestaande `.env`:
+
+```dotenv
+BIND_ADDRESS=0.0.0.0
+ALLOWED_HOSTS=*
+```
+
+Behoud je `SECRET_KEY`, databasewachtwoord en overige instellingen. Vervolgens:
+
+```sh
+git pull --ff-only
+docker compose up -d --build --wait
+```
+
+Open daarna `http://<LAN-IP-van-je-server>:8000` (of je eigen `PORT`). Je gegevens blijven in het bestaande databasevolume bewaard.
 
 ### Updates
 
