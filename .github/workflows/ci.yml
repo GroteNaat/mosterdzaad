@@ -61,6 +61,18 @@ jobs:
           curl --fail http://127.0.0.1:8000/tracker/ > /dev/null
           host_ip=$(hostname -I | awk '{print $1}')
           curl --noproxy '*' --fail "http://${host_ip}:8000/tracker/" > /dev/null
+          docker compose exec -T app python -c "from pathlib import Path; assert 'NoNewPrivs:\t1' in Path('/proc/self/status').read_text()"
+      - name: Test hostcompatibiliteit zonder no-new-privileges
+        env:
+          SECRET_KEY: smoke-only-secret-not-for-production
+          POSTGRES_PASSWORD: smoke-only-password
+          NO_NEW_PRIVILEGES: "false"
+        run: |
+          docker compose up -d --no-build --no-deps --force-recreate --wait --wait-timeout 120 app
+          docker compose exec -T app python -c "import os; from pathlib import Path; assert os.getuid() == 10001; assert 'NoNewPrivs:\t0' in Path('/proc/self/status').read_text()"
+          curl --fail http://127.0.0.1:8000/health/
+          host_ip=$(hostname -I | awk '{print $1}')
+          curl --noproxy '*' --fail "http://${host_ip}:8000/tracker/" > /dev/null
       - name: Logs bij fout
         if: failure()
         run: docker compose logs

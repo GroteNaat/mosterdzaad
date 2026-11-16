@@ -92,6 +92,25 @@ Gebruik nooit `docker compose down -v` om te updaten: daarmee verwijder je het d
 
 GitHub Actions test de app met PostgreSQL, bouwt en start de Docker-installatie en publiceert bij een geslaagde push naar `main` een image op `ghcr.io/grotenaat/mosterdzaad`. Voor Ubuntu x86-64. Bouwen op de eigen server blijft mogelijk zonder gepubliceerde image. Controleer of Actions ingeschakeld is en of het package voor download openbaar is.
 
+### Opstartfout: `exec /bin/sh: operation not permitted`
+
+Wanneer de app direct herstart met exitcode 255, kan de combinatie van je Docker-host en `no-new-privileges` de processtart blokkeren. Dit is bevestigd als dezelfde tijdelijke container met deze optie faalt en zonder deze optie wel start; alleen de foutmelding is niet voldoende om die oorzaak vast te stellen.
+
+Voor een host waarop dit bevestigd is, haal je de bijgewerkte configuratie op met `git pull --ff-only` en voeg je in je bestaande `.env` deze regel toe (of wijzig je de bestaande waarde):
+
+```dotenv
+NO_NEW_PRIVILEGES=false
+```
+
+Laat de overige `.env`-waarden staan en maak de appcontainer opnieuw aan:
+
+```sh
+docker compose up -d --build --wait --wait-timeout 120
+docker compose ps
+```
+
+Dit schakelt uitsluitend de extra `no-new-privileges`-beperking voor de appcontainer uit. Daardoor vervalt die bescherming tegen het verkrijgen van extra rechten bij het starten van programma’s. De app blijft als gebruiker 10001 draaien, met een alleen-lezen bestandssysteem en alle Linux-capabilities verwijderd. De database en gegevensvolumes blijven behouden. Op andere hosts blijft de standaard `true`; na herstel van het hostprobleem kun je de optie weer inschakelen en de container opnieuw aanmaken.
+
 ## Back-up en herstel
 
 ### Volledige databaseback-up
