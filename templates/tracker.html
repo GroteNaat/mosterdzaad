@@ -23,12 +23,12 @@
   </div>
   <div class="tracker-grid">
     {% for book in testament.list %}
-    <article class="panel book-card" style="--chapter-columns:{{ book.tracker_columns }}" aria-labelledby="book-{{ book.code }}">
+    <article class="panel book-card" aria-labelledby="book-{{ book.code }}">
       <a class="section-heading book-link" href="{% url 'book' book.code %}">
         <h3 id="book-{{ book.code }}">{{ book.name }}</h3>
         <span>{{ book.percent }}%</span>
       </a>
-      <div class="mini-chapters">
+      <div class="mini-chapters" role="group" aria-label="Hoofdstukken van {{ book.name }}">
         {% for chapter in book.chapter_progress %}
         <a class="mini-chapter is-{{ chapter.state }}" href="{% url 'book' book.code %}?chapter={{ chapter.number }}" style="--chapter-progress:{{ chapter.percent|unlocalize }}%" title="{{ book.name }} {{ chapter.number }}: {{ chapter.read }} van {{ chapter.total }} verzen gelezen" aria-label="{{ book.name }} {{ chapter.number }}: {{ chapter.read }} van {{ chapter.total }} verzen gelezen"><span class="chapter-number" aria-hidden="true">{{ chapter.number }}</span></a>
         {% endfor %}
