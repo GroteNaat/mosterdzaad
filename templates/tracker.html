@@ -1,4 +1,46 @@
-{% extends 'base.html' %}{% block title %}Bijbeltracker · Mosterdzaad{% endblock %}{% block content %}
-<div class="page-heading"><div><p class="eyebrow">VERS VOOR VERS</p><h1>Jouw Bijbeltracker</h1><p class="muted">Open een boek. Ontdek wat je al hebt gelezen en vastgelegd.</p></div></div><div class="legend"><span><i class="empty-dot"></i>Nog geen notitie</span><span><i class="partial-dot"></i>Gedeeltelijk gelezen</span><span><i class="complete-dot"></i>Volledig gelezen</span></div>
-{% regroup progress by testament as testaments %}{% for testament in testaments %}<section><div class="section-heading testament-heading"><h2>{% if testament.grouper == 'OT' %}Oude Testament{% elif testament.grouper == 'NT' %}Nieuwe Testament{% else %}Deuterocanonieke boeken & toevoegingen{% endif %}</h2><span class="muted">{{ testament.list|length }} boeken</span></div><div class="tracker-grid">{% for book in testament.list %}<a class="panel book-card" href="{% url 'book' book.code %}"><div class="section-heading"><h3>{{ book.name }}</h3><span>{{ book.percent }}%</span></div><div class="mini-chapters" aria-hidden="true">{% for chapter in book.chapter_progress %}<span class="{{ chapter.state }}" title="Hoofdstuk {{ chapter.number }}"></span>{% endfor %}</div><div class="card-meta"><span>{{ book.complete_chapters }} / {{ book.chapters|length }} hoofdstukken</span><span>{{ book.read }} verzen</span></div></a>{% endfor %}</div></section>{% endfor %}<p class="hint">Nummering: {{ preferences.get_versification_display }}. Bekijk de toelichting bij <a href="{% url 'settings' %}">Instellingen</a>.</p>
+{% extends 'base.html' %}
+{% load l10n %}
+{% block title %}Bijbeltracker · Mosterdzaad{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">VERS VOOR VERS</p>
+    <h1>Jouw Bijbeltracker</h1>
+    <p class="muted">Open een boek of kies een hoofdstuk. Ontdek wat je al hebt gelezen en vastgelegd.</p>
+  </div>
+</div>
+<div class="legend">
+  <span><i class="empty-dot"></i>Nog geen notitie</span>
+  <span><i class="partial-dot"></i>Gedeeltelijk gelezen</span>
+  <span><i class="complete-dot"></i>Volledig gelezen</span>
+</div>
+{% regroup progress by testament as testaments %}
+{% for testament in testaments %}
+<section>
+  <div class="section-heading testament-heading">
+    <h2>{% if testament.grouper == 'OT' %}Oude Testament{% elif testament.grouper == 'NT' %}Nieuwe Testament{% else %}Deuterocanonieke boeken & toevoegingen{% endif %}</h2>
+    <span class="muted">{{ testament.list|length }} boeken</span>
+  </div>
+  <div class="tracker-grid">
+    {% for book in testament.list %}
+    <article class="panel book-card" style="--chapter-columns:{{ book.tracker_columns }}" aria-labelledby="book-{{ book.code }}">
+      <a class="section-heading book-link" href="{% url 'book' book.code %}">
+        <h3 id="book-{{ book.code }}">{{ book.name }}</h3>
+        <span>{{ book.percent }}%</span>
+      </a>
+      <div class="mini-chapters">
+        {% for chapter in book.chapter_progress %}
+        <a class="mini-chapter is-{{ chapter.state }}" href="{% url 'book' book.code %}?chapter={{ chapter.number }}" style="--chapter-progress:{{ chapter.percent|unlocalize }}%" title="{{ book.name }} {{ chapter.number }}: {{ chapter.read }} van {{ chapter.total }} verzen gelezen" aria-label="{{ book.name }} {{ chapter.number }}: {{ chapter.read }} van {{ chapter.total }} verzen gelezen"><span class="chapter-number" aria-hidden="true">{{ chapter.number }}</span></a>
+        {% endfor %}
+      </div>
+      <div class="card-meta">
+        <span>{{ book.complete_chapters }} / {{ book.chapters|length }} hoofdstukken</span>
+        <span>{{ book.read }} verzen</span>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+<p class="hint">Nummering: {{ preferences.get_versification_display }}. Bekijk de toelichting bij <a href="{% url 'settings' %}">Instellingen</a>.</p>
 {% endblock %}

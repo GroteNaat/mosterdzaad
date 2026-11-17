@@ -80,6 +80,6 @@ def book_progress(book, covered):
     chapters = []
     for number, total in enumerate(book['chapters'], 1):
         read = len(covered.get((book['code'], number), set()) & set(range(1, total + 1)))
-        chapters.append({'number': number, 'total': total, 'read': read, 'state': 'complete' if read == total else 'partial' if read else 'empty'})
+        chapters.append({'number': number, 'total': total, 'read': read, 'percent': round(100 * read / total, 1), 'state': 'complete' if read == total else 'partial' if read else 'empty'})
     read, total = sum(c['read'] for c in chapters), sum(book['chapters'])
     return {**book, 'chapter_progress': chapters, 'read': read, 'total': total, 'percent': round(100 * read / total, 1), 'complete_chapters': sum(c['state'] == 'complete' for c in chapters)}

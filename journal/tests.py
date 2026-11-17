@@ -40,6 +40,53 @@ class PassageTests(TestCase):
         self.assertEqual(parse_passages('Joël 4', self.prefs)[0][1], 4)
 
 
+class TrackerLayoutTests(TestCase):
+    def test_columns_follow_largest_book_in_each_desktop_row(self):
+        prefs = Preferences.current()
+        for scheme in ('english', 'original'):
+            for extra_books in (False, True):
+                with self.subTest(scheme=scheme, extra_books=extra_books):
+                    prefs.versification = scheme
+                    prefs.deuterocanonical = extra_books
+                    prefs.save()
+                    response = self.client.get(reverse('tracker'))
+                    columns = {book['code']: book['tracker_columns'] for book in response.context['progress']}
+                    self.assertEqual(len(columns), 78 if extra_books else 66)
+                    for code in ('GEN', 'EXO', 'LEV', 'PSA', 'PRO', 'ECC'):
+                        self.assertEqual(columns[code], 20)
+                    for code in ('HOS', 'JOL', 'AMO'):
+                        self.assertEqual(columns[code], 14)
+                    for code in ('OBA', 'JON', 'MIC'):
+                        self.assertEqual(columns[code], 7)
+                    for code in ('NAM', 'HAB', 'ZEP'):
+                        self.assertEqual(columns[code], 3)
+                    if extra_books:
+                        for code in ('TOB', 'JDT', 'WIS'):
+                            self.assertEqual(columns[code], 19)
+                        for code in ('SUS', 'BEL', 'MAN'):
+                            self.assertEqual(columns[code], 1)
+
+    def test_chapter_fill_and_links_with_dutch_number_formatting(self):
+        form = NoteForm({'body': 'Een gedachte', 'references': 'Genesis 1:1-8; Genesis 2; Genesis 3:1'})
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        response = self.client.get(reverse('tracker'))
+        chapters = response.context['progress'][0]['chapter_progress']
+        self.assertEqual([(c['state'], c['percent']) for c in chapters[:4]], [
+            ('partial', 25.8), ('complete', 100.0), ('partial', 4.2), ('empty', 0.0),
+        ])
+        for url in (reverse('tracker'), reverse('book', args=['GEN'])):
+            with self.subTest(url=url):
+                page = self.client.get(url)
+                self.assertContains(page, '--chapter-progress:25.8%')
+                self.assertNotContains(page, '--chapter-progress:25,8%')
+                self.assertContains(page, 'is-partial')
+                self.assertContains(page, 'is-complete')
+                self.assertContains(page, 'is-empty')
+        self.assertContains(response, 'href="/tracker/GEN/?chapter=50"')
+        self.assertContains(response, 'aria-label="Genesis 1: 8 van 31 verzen gelezen"')
+
+
 class NoteRulesTests(TestCase):
     def make_note(self, refs, **extra):
         form = NoteForm({'body': 'Een gedachte bij deze passage.', 'references': refs, **extra})

@@ -1,3 +1,4 @@
+from itertools import groupby
 from urllib.parse import urlencode
 from django.contrib import messages
 from django.core import serializers
@@ -30,6 +31,14 @@ def dashboard(request):
 def tracker(request):
     prefs, covered = Preferences.current(), coverage()
     progress = [book_progress(b, covered) for b in visible_books(prefs)]
+    # Each desktop row shares a chapter width, restarting at each testament.
+    for _, testament in groupby(progress, key=lambda book: book['testament']):
+        books = list(testament)
+        for start in range(0, len(books), 3):
+            row = books[start:start + 3]
+            columns = min(20, max(len(book['chapters']) for book in row))
+            for book in row:
+                book['tracker_columns'] = columns
     return render(request, 'tracker.html', {'active': 'tracker', 'progress': progress})
 
 

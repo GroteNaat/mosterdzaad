@@ -13,6 +13,8 @@ Een persoonlijke, zelf te hosten Bijbelstudie-app. Lees in je fysieke Bijbel en 
 
 Een vers telt alleen als gelezen zolang er minstens één niet-lege notitie aan gekoppeld is. Overlap telt eenmaal. Verwijderen of aanpassen van notities verandert de tracker direct. Een heel hoofdstuk is gelezen zodra alle verzen gedekt zijn. Planvoortgang wordt afgeleid van de passages; een notitie bij alleen een plan markeert geen passages als gelezen.
 
+De tracker toont op brede liggende schermen drie boeken naast elkaar. Het boek met de meeste hoofdstukken bepaalt per drietal de kolombreedte, met maximaal 20 hoofdstukken per rij; een laatste onvolledige rij begint links. Hoofdstukvakjes blijven even groot en vullen van onder naar boven op basis van het aantal gelezen verzen. Op smalle schermen, staande schermen en aanraakapparaten staan de boeken onder elkaar, met genummerde hoofdstukken en tikvlakken van minimaal 44 bij 44 pixels. Zowel een boektitel als een afzonderlijk hoofdstuk is direct te openen, ook zonder JavaScript.
+
 ## Installeren op Ubuntu Server
 
 Benodigd: Git, Docker Engine en de Docker Compose-plugin. Installeer Docker zo nodig volgens de [officiële Ubuntu-instructies](https://docs.docker.com/engine/install/ubuntu/).
