@@ -42,6 +42,19 @@ class TestController extends AppController {
   }
 }
 
+Future<void> screenshot(WidgetTester tester, GlobalKey key, String name) async {
+  final boundary =
+      key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+  await tester.runAsync(() async {
+    final image = await boundary.toImage(pixelRatio: 1);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    final file = File('build/previews/$name.png');
+    await file.parent.create(recursive: true);
+    await file.writeAsBytes(bytes!.buffer.asUint8List());
+    image.dispose();
+  });
+}
+
 void main() {
   testWidgets(
     'First start offers both choices, creates a book, and saves a linked note',
@@ -127,6 +140,86 @@ void main() {
     },
   );
   for (final width in [390.0, 1280.0]) {
+    testWidgets('Navigate, search and create a plan at width $width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final picker = TestPicker();
+      final app = TestController(picker);
+      await app.attach(
+        await VaultRepository.create(
+          picker.memory,
+          app.bible,
+          'Mijn studieboek',
+          'english',
+          false,
+        ),
+      );
+      await app.save(
+        'note',
+        noteData(
+          app.bible,
+          body: 'Rust vinden in Psalm 23',
+          references: 'Psalm 23',
+        ),
+      );
+      final key = GlobalKey();
+      await tester.pumpWidget(
+        RepaintBoundary(key: key, child: MosterdzaadApp(app)),
+      );
+      await tester.pumpAndSettle();
+      await screenshot(tester, key, 'overview-${width.toInt()}');
+      Future<void> navigate(String label) async {
+        if (width < 980) {
+          await tester.tap(find.byIcon(Icons.menu));
+          await tester.pumpAndSettle();
+        }
+        await tester.tap(find.text(label).first);
+        await tester.pumpAndSettle();
+      }
+
+      await navigate('Bijbeltracker');
+      await screenshot(tester, key, 'tracker-${width.toInt()}');
+      await tester.tap(find.text('Genesis'));
+      await tester.pumpAndSettle();
+      expect(find.text('Notitie bij Genesis 1'), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      await navigate('Notities');
+      await tester.enterText(find.byType(TextField), 'rust');
+      await tester.pumpAndSettle();
+      expect(find.text('Rust vinden in Psalm 23'), findsWidgets);
+      await tester.enterText(find.byType(TextField), 'onvindbaar');
+      await tester.pumpAndSettle();
+      expect(find.text('Geen notities gevonden'), findsOneWidget);
+      await navigate('Leesplannen');
+      await tester.tap(find.text('Nieuw toevoegen'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Titel'),
+        'Een week in de Psalmen',
+      );
+      await tester.tap(find.text('Sessie 1'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Bijbelverwijzingen'),
+        'Psalm 23',
+      );
+      await tester.tap(find.text('Opslaan').first);
+      await tester.pumpAndSettle();
+      expect(app.ofKind('plan').single.sessions.first['passages'], isNotEmpty);
+      await tester.tap(find.text('Een week in de Psalmen'));
+      await tester.pumpAndSettle();
+      await screenshot(tester, key, 'plan-${width.toInt()}');
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      await navigate('Instellingen');
+      await screenshot(tester, key, 'settings-${width.toInt()}');
+      expect(tester.takeException(), isNull);
+    });
     testWidgets('Welcome layout and screenshot at width $width', (
       tester,
     ) async {

@@ -10,6 +10,8 @@ Bij de eerste start kies je **Nieuw studieboek maken** of **Studieboek openen**.
 
 De app onthoudt de locatie en opent het studieboek bij een volgende start opnieuw. Bij een verplaatste map, ingetrokken toestemming of ontbrekende schijf kun je opnieuw kiezen. Annuleren maakt geen leeg vervangend studieboek.
 
+Op iPhone/iPad is de eigen documentmap zichtbaar in Bestanden. Studieboeken binnen die appmap worden bij het verwijderen van de app ook verwijderd; kopieer ze vooraf naar een andere locatie of kies een map in iCloud Drive.
+
 - Notities met meerdere passages, thema’s, leesplannen en studies.
 - Bijbeltracker met hoofdstuk- en versoverzichten; overlap telt één keer.
 - Leesplannen met 1–366 bewerkbare sessies en overdenkingen.

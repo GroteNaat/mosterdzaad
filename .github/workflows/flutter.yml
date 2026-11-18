@@ -65,6 +65,9 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@v3
         if: matrix.target == 'android'
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - run: flutter --suppress-analytics pub get --enforce-lockfile
       - name: Analyze and test
         if: matrix.target == 'linux'

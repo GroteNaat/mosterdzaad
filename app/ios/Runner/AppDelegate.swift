@@ -37,6 +37,7 @@ final class VaultBridge: NSObject, UIDocumentPickerDelegate {
       let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
       picker.delegate = self
       picker.allowsMultipleSelection = false
+      picker.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
       host.present(picker, animated: true)
       return
     }
@@ -52,14 +53,21 @@ final class VaultBridge: NSObject, UIDocumentPickerDelegate {
     guard let result = pending else { return }
     pending = nil
     do {
-      guard let url = urls.first, url.startAccessingSecurityScopedResource() else { throw CocoaError(.fileReadNoPermission) }
-      defer { url.stopAccessingSecurityScopedResource() }
+      guard let url = urls.first else { throw CocoaError(.fileReadNoPermission) }
+      let scoped = url.startAccessingSecurityScopedResource()
+      guard scoped || AppleVaultFiles.isInsideContainer(url) else { throw CocoaError(.fileReadNoPermission) }
+      defer { if scoped { url.stopAccessingSecurityScopedResource() } }
       result(try AppleVaultFiles.location(url))
     } catch { result(FlutterError(code: "permission", message: error.localizedDescription, details: nil)) }
   }
 }
 
 enum AppleVaultFiles {
+  // A user-selected location within our own Documents folder needs no sandbox extension.
+  static func isInsideContainer(_ url: URL) -> Bool {
+    let container = URL(fileURLWithPath: NSHomeDirectory()).resolvingSymlinksInPath().path
+    return url.resolvingSymlinksInPath().path.hasPrefix(container + "/")
+  }
   static func location(_ url: URL) throws -> [String: String] {
     let data = try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
     return ["kind": "apple", "token": data.base64EncodedString(), "label": url.lastPathComponent]
@@ -71,8 +79,10 @@ enum AppleVaultFiles {
     guard parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("\\") && !$0.contains(":") }) else { throw CocoaError(.fileReadInvalidFileName) }
     var stale = false
     let root = try URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
-    guard !stale, root.startAccessingSecurityScopedResource() else { throw CocoaError(.fileReadNoPermission) }
-    defer { root.stopAccessingSecurityScopedResource() }
+    guard !stale else { throw CocoaError(.fileReadNoPermission) }
+    let scoped = root.startAccessingSecurityScopedResource()
+    guard scoped || isInsideContainer(root) else { throw CocoaError(.fileReadNoPermission) }
+    defer { if scoped { root.stopAccessingSecurityScopedResource() } }
 
     var coordinationError: NSError?
     var operationError: Error?

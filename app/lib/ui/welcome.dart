@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 import '../app_controller.dart';
 import 'common.dart';
@@ -238,6 +239,12 @@ class _NewBookDialogState extends State<NewBookDialog> {
               const Text(
                 'Kies de versindeling die bij je Bijbel past. Die staat vast zodra je passages bewaart. In de gekozen locatie maken we een nieuwe map voor dit studieboek.',
               ),
+              if (Platform.isIOS) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  'De lokale map Mosterdzaad in Bestanden hoort bij deze app. Kopieer je studieboek naar een andere locatie voordat je de app verwijdert, of kies nu een map in iCloud Drive.',
+                ),
+              ],
               if (saving)
                 const Padding(
                   padding: EdgeInsets.only(top: 20),
