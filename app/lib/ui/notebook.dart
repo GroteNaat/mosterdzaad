@@ -4,6 +4,8 @@ import '../domain/bible.dart';
 import '../domain/entry.dart';
 import 'common.dart';
 import 'editor.dart';
+import 'sync_panel.dart';
+import 'package:flutter/foundation.dart';
 
 class NotebookShell extends StatefulWidget {
   const NotebookShell(this.app, {super.key});
@@ -71,6 +73,20 @@ class _NotebookShellState extends State<NotebookShell>
       appBar: AppBar(
         title: Text(app.repository!.name),
         actions: [
+          if (app.syncEnabled)
+            IconButton(
+              tooltip:
+                  app.syncError ??
+                  (app.syncing
+                      ? 'Synchroniseren…'
+                      : 'Synchroniseren met Dropbox'),
+              onPressed: app.syncing ? null : app.syncNow,
+              icon: Icon(
+                app.syncError != null
+                    ? Icons.cloud_off_outlined
+                    : Icons.cloud_done_outlined,
+              ),
+            ),
           if (app.busy)
             const Padding(
               padding: EdgeInsets.all(16),
@@ -81,7 +97,7 @@ class _NotebookShellState extends State<NotebookShell>
               ),
             ),
           IconButton(
-            tooltip: 'Opnieuw lezen uit map',
+            tooltip: 'Studieboek vernieuwen',
             onPressed: app.busy ? null : app.refresh,
             icon: const Icon(Icons.refresh),
           ),
@@ -289,7 +305,9 @@ class OverviewPage extends StatelessWidget {
       for (final n in app.ofKind('note').take(5)) NoteCard(app, n),
       const SizedBox(height: 20),
       Text(
-        'Opgeslagen in ${app.repository!.files.location.label}',
+        kIsWeb
+            ? 'Opgeslagen in deze browser'
+            : 'Opgeslagen in ${app.repository!.files.location.label}',
         style: const TextStyle(color: Colors.black54),
       ),
     ]);
@@ -1044,6 +1062,8 @@ class SettingsPage extends StatelessWidget {
         'Je gegevens blijven op de plek die jij kiest.',
       ),
       if (app.notice != null) Notice(app.notice!),
+      SyncPanel(app),
+      const SizedBox(height: 20),
       Card(
         child: Padding(
           padding: const EdgeInsets.all(22),
@@ -1053,15 +1073,25 @@ class SettingsPage extends StatelessWidget {
               Text(repo.name, style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 10),
               SelectableText(
-                repo.files.location.kind == 'path'
+                kIsWeb
+                    ? 'Op dit apparaat, in deze browser'
+                    : repo.files.location.kind == 'path'
                     ? repo.files.location.token
                     : repo.files.location.label,
               ),
               const SizedBox(height: 10),
               const Text(
-                'Deze map bevat alle notities en eerdere versies. Maak regelmatig een kopie van de volledige map. De inhoud is niet versleuteld.',
+                kIsWeb
+                    ? 'Alle notities en eerdere versies staan in deze browser. Bewaar regelmatig een reservekopie buiten de browser. De inhoud is niet versleuteld.'
+                    : 'Deze map bevat alle notities en eerdere versies. Maak regelmatig een kopie van de volledige map. De inhoud is niet versleuteld.',
               ),
               const SizedBox(height: 16),
+              if (kIsWeb)
+                OutlinedButton.icon(
+                  onPressed: app.busy ? null : () => app.run(app.exportBackup),
+                  icon: const Icon(Icons.download),
+                  label: const Text('Reservekopie downloaden'),
+                ),
               OutlinedButton.icon(
                 onPressed: () => app.run(() async {
                   await app.closeBook();
@@ -1088,7 +1118,7 @@ class SettingsPage extends StatelessWidget {
             child: Text('Hebreeuws / BHS (Oude Testament)'),
           ),
         ],
-        onChanged: repo.hasPassages
+        onChanged: repo.hasPassages || (repo.heads[repo.id]?.length ?? 0) > 1
             ? null
             : (value) => app.run(() async {
                 await app.save(
@@ -1110,14 +1140,16 @@ class SettingsPage extends StatelessWidget {
         contentPadding: EdgeInsets.zero,
         title: const Text('Deuterocanonieke boeken tonen'),
         value: repo.extra,
-        onChanged: (value) => app.run(() async {
-          await app.save(
-            'preferences',
-            {'versification': repo.scheme, 'deuterocanonical': value},
-            original: prefs,
-            id: repo.id,
-          );
-        }),
+        onChanged: (repo.heads[repo.id]?.length ?? 0) > 1
+            ? null
+            : (value) => app.run(() async {
+                await app.save(
+                  'preferences',
+                  {'versification': repo.scheme, 'deuterocanonical': value},
+                  original: prefs,
+                  id: repo.id,
+                );
+              }),
       ),
       const SizedBox(height: 20),
       Text(
@@ -1190,7 +1222,7 @@ class SettingsPage extends StatelessWidget {
         ),
       const SizedBox(height: 24),
       const Notice(
-        'Gebruik een studieboek op één apparaat tegelijk. Een cloudmap is nog geen ingebouwde synchronisatie. Rond het opslaan en synchroniseren af voordat je op een ander apparaat verdergaat.',
+        'Controleer de laatste synchronisatie voordat je op een ander apparaat verdergaat. Bij gelijktijdige wijzigingen blijven beide versies bewaard bij Herstel en geschiedenis.',
       ),
       TextButton(
         onPressed: () => showLicensePage(

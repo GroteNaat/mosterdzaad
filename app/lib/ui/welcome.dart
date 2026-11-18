@@ -1,7 +1,8 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import '../app_controller.dart';
 import 'common.dart';
+import 'sync_panel.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen(this.app, {super.key});
@@ -57,8 +58,9 @@ class WelcomeScreen extends StatelessWidget {
                       _Choice(
                         icon: Icons.create_new_folder_outlined,
                         title: 'Nieuw studieboek',
-                        description:
-                            'Begin met een lege verzameling. Kies zelf de map waarin je gegevens worden bewaard.',
+                        description: kIsWeb
+                            ? 'Begin met een lege verzameling, lokaal opgeslagen in deze browser.'
+                            : 'Begin met een lege verzameling. Kies zelf de map waarin je gegevens worden bewaard.',
                         button: 'Nieuw studieboek maken',
                         onTap: app.busy
                             ? null
@@ -71,10 +73,13 @@ class WelcomeScreen extends StatelessWidget {
                       _Choice(
                         icon: Icons.folder_open_outlined,
                         title: 'Bestaand studieboek',
-                        description:
-                            'Open de map van een studieboek dat je eerder met deze app hebt gemaakt.',
+                        description: kIsWeb
+                            ? 'Ga verder met een studieboek dat in deze browser is opgeslagen.'
+                            : 'Open de map van een studieboek dat je eerder met deze app hebt gemaakt.',
                         button: 'Studieboek openen',
-                        onTap: app.busy ? null : app.chooseExisting,
+                        onTap: app.busy
+                            ? null
+                            : () => openLocalBooks(context, app),
                       ),
                     ];
                     return constraints.maxWidth > 640
@@ -96,6 +101,14 @@ class WelcomeScreen extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 28),
+                SyncPanel(app),
+                if (kIsWeb)
+                  TextButton.icon(
+                    onPressed: app.busy ? null : () => importBackup(app),
+                    icon: const Icon(Icons.upload_file),
+                    label: const Text('Reservekopie herstellen'),
+                  ),
+                const SizedBox(height: 20),
                 const Wrap(
                   spacing: 24,
                   runSpacing: 10,
@@ -107,7 +120,9 @@ class WelcomeScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'De app opent de mapkiezer van je apparaat. Maak regelmatig een kopie van je volledige studieboekmap.',
+                  kIsWeb
+                      ? 'Browsergegevens kunnen worden gewist. Maak regelmatig een reservekopie of gebruik Dropbox. Op iPhone: open in Safari en kies Deel → Zet op beginscherm.'
+                      : 'De app opent de mapkiezer van je apparaat. Maak regelmatig een kopie van je volledige studieboekmap.',
                   style: TextStyle(color: Colors.black54),
                 ),
               ],
@@ -237,9 +252,11 @@ class _NewBookDialogState extends State<NewBookDialog> {
                 onChanged: saving ? null : (v) => setState(() => extra = v!),
               ),
               const Text(
-                'Kies de versindeling die bij je Bijbel past. Die staat vast zodra je passages bewaart. In de gekozen locatie maken we een nieuwe map voor dit studieboek.',
+                kIsWeb
+                    ? 'Kies de versindeling die bij je Bijbel past. Die staat vast zodra je passages bewaart. Je studieboek wordt in deze browser opgeslagen.'
+                    : 'Kies de versindeling die bij je Bijbel past. Die staat vast zodra je passages bewaart. In de gekozen locatie maken we een nieuwe map voor dit studieboek.',
               ),
-              if (Platform.isIOS) ...[
+              if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) ...[
                 const SizedBox(height: 12),
                 const Text(
                   'De lokale map Mosterdzaad in Bestanden hoort bij deze app. Kopieer je studieboek naar een andere locatie voordat je de app verwijdert, of kies nu een map in iCloud Drive.',
@@ -261,7 +278,7 @@ class _NewBookDialogState extends State<NewBookDialog> {
         ),
         FilledButton.icon(
           icon: const Icon(Icons.folder_open),
-          label: const Text('Locatie kiezen'),
+          label: const Text(kIsWeb ? 'Studieboek maken' : 'Locatie kiezen'),
           onPressed: saving
               ? null
               : () async {

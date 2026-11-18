@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
+import 'platform/platform_services.dart';
 import 'app_controller.dart';
 import 'domain/bible.dart';
 import 'ui/common.dart';
@@ -25,8 +25,8 @@ Future<void> main() async {
     });
     final app = AppController(
       bible: Bible(english, original),
-      supportDirectory: await getApplicationSupportDirectory(),
-      cacheDirectory: await getApplicationCacheDirectory(),
+      supportDirectory: await supportPath(),
+      cacheDirectory: await cachePath(),
     );
     runApp(MosterdzaadApp(app));
     await app.start();

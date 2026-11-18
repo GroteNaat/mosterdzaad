@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../domain/bible.dart';
 import '../domain/entry.dart';
 import 'vault_files.dart';
+import 'vault_snapshot.dart';
 
 class VaultConflict implements Exception {
   const VaultConflict(this.message);
@@ -31,11 +32,7 @@ class VaultRepository {
   List<List<Entry>> get conflicts =>
       heads.values.where((v) => v.length > 1).toList();
   String get scheme =>
-      entries
-          .where((e) => e.kind == 'preferences')
-          .firstOrNull
-          ?.text('versification') ??
-      'english';
+      heads[id]?.firstOrNull?.text('versification') ?? 'english';
   bool get extra =>
       entries
               .where((e) => e.kind == 'preferences')
@@ -142,9 +139,10 @@ class VaultRepository {
     }
     final candidateHeads = revisionHeads(records);
     final prefs = candidateHeads[j['id']];
-    if (prefs != null && prefs.length > 1) {
+    if (prefs != null &&
+        prefs.map((e) => e.text('versification')).toSet().length > 1) {
       throw const VaultConflict(
-        'Er zijn conflicterende instellingen. Herstel de studieboekmap vanuit een consistente kopie.',
+        'De kopieën gebruiken verschillende versindelingen. Synchronisatie is gestopt; kies op beide apparaten dezelfde indeling voordat je verdergaat.',
       );
     }
     final currentScheme = prefs?.first.text('versification') ?? 'english';
@@ -170,6 +168,7 @@ class VaultRepository {
     if (candidateHeads.values.any((h) => h.isEmpty)) {
       throw const FormatException('Ongeldige revisiegeschiedenis.');
     }
+    orderedRecords(records);
     id = j['id'] as String;
     name = j['name'] as String;
     history = records;
@@ -177,6 +176,72 @@ class VaultRepository {
     warnings = problems;
     _fingerprints = prints;
   }
+
+  Future<T> _exclusive<T>(Future<T> Function() action) {
+    final result = _queue.then((_) => action());
+    _queue = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
+  }
+
+  Future<VaultSnapshot> _snapshot() async {
+    await reload();
+    if (warnings.isNotEmpty) {
+      throw const VaultConflict(
+        'Herstel eerst de onvolledige bestanden voordat je synchroniseert of exporteert.',
+      );
+    }
+    final data = <String, String>{
+      'mosterdzaad.json': (await files.read('mosterdzaad.json'))!,
+    };
+    for (final e in history) {
+      final path = 'records/${e.filename}';
+      final text = await files.read(path);
+      if (text == null) {
+        throw const VaultConflict(
+          'Een bestand is tijdens het lezen verdwenen.',
+        );
+      }
+      data[path] = text;
+    }
+    final snapshot = VaultSnapshot(data);
+    await snapshot.validate(bible);
+    return snapshot;
+  }
+
+  Future<VaultSnapshot> snapshot() => _exclusive(_snapshot);
+
+  Future<VaultSnapshot> mergeSnapshot(
+    VaultSnapshot incoming,
+  ) => _exclusive(() async {
+    final remote = await incoming.validate(bible);
+    final local = await _snapshot();
+    final merged = local.union(incoming);
+    final candidate = await merged.validate(bible);
+    if ((hasPassages && candidate.scheme != scheme) ||
+        (remote.hasPassages && candidate.scheme != remote.scheme)) {
+      throw const VaultConflict(
+        'De kopieën gebruiken verschillende versindelingen. De gegevens zijn behouden; synchroniseer alleen studieboeken met dezelfde indeling.',
+      );
+    }
+    merged.encode(); // Check size before changing local files.
+    for (final e in orderedRecords(candidate.history)) {
+      final path = 'records/${e.filename}';
+      if (local.contents.containsKey(path)) continue;
+      final existing = await files.read(path);
+      if (existing != null && existing != merged.contents[path]) {
+        throw const VaultConflict(
+          'Het studieboek is tijdens synchronisatie gewijzigd. Probeer opnieuw.',
+        );
+      }
+      if (existing == null) await files.writeNew(path, merged.contents[path]!);
+      if (await files.read(path) != merged.contents[path]) {
+        throw const VaultConflict(
+          'Een ontvangen bestand kon niet volledig worden opgeslagen.',
+        );
+      }
+    }
+    return _snapshot();
+  });
 
   Future<Entry> save(
     String kind,

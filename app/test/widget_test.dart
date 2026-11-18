@@ -25,8 +25,8 @@ class TestController extends AppController {
   TestController(TestPicker picker)
     : super(
         bible: testBible(),
-        supportDirectory: Directory.systemTemp,
-        cacheDirectory: Directory.systemTemp,
+        supportDirectory: Directory.systemTemp.path,
+        cacheDirectory: Directory.systemTemp.path,
         picker: picker,
       );
   @override

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="nl"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Terug naar Mosterdzaad</title></head>
+<body><p>Keer terug naar Mosterdzaad om de Dropbox-aanmelding af te ronden.</p>
+<script>
+  const callback = location.href;
+  history.replaceState(null, '', location.pathname);
+  const message = {'flutter-web-auth-2': callback};
+  if (window.opener) {
+    window.opener.postMessage(message, location.origin);
+    window.close();
+  } else {
+    // Standalone iOS PWA: the opener may be unavailable. This contains only
+    // the short-lived code + state; the PKCE verifier stays in the original app.
+    localStorage.setItem('flutter-web-auth-2', callback);
+    setTimeout(() => {
+      if (localStorage.getItem('flutter-web-auth-2') === callback)
+        localStorage.removeItem('flutter-web-auth-2');
+    }, 180000);
+    window.close();
+  }
+</script></body></html>

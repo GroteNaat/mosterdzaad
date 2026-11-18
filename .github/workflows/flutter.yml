@@ -1,4 +1,4 @@
-name: Native apps
+name: Apps and PWA
 on:
   push:
     branches: [main, codex/flutter-local-app]
@@ -22,6 +22,7 @@ jobs:
           - {os: windows-latest, target: windows}
           - {os: macos-latest, target: apple}
           - {os: ubuntu-latest, target: android}
+          - {os: ubuntu-22.04, target: web}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     defaults:
@@ -111,6 +112,18 @@ jobs:
           flutter --suppress-analytics build apk --debug
           mkdir -p build/packages
           cp build/app/outputs/flutter-apk/app-debug.apk build/packages/Mosterdzaad-android-test.apk
+      - name: Test browser storage and build PWA
+        if: matrix.target == 'web'
+        env:
+          CHROME_EXECUTABLE: /usr/bin/google-chrome
+        run: |
+          flutter --suppress-analytics build web --release --no-web-resources-cdn
+          dart run tool/prepare_pwa.dart
+          npm install --prefix "$RUNNER_TEMP/pwa-test" --no-save --no-audit --no-fund playwright@1.62.1
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/pwa-test/node_modules/playwright" node tool/test_pwa.cjs
+          mkdir -p build/packages
+          cd build/web
+          zip -qr ../packages/Mosterdzaad-pwa.zip .
       - uses: actions/upload-artifact@v4
         if: success()
         with:
@@ -118,8 +131,8 @@ jobs:
           path: app/build/packages/*
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
-        if: always() && matrix.target == 'linux'
+        if: always() && (matrix.target == 'linux' || matrix.target == 'web')
         with:
-          name: interface-previews
+          name: interface-previews-${{ matrix.target }}
           path: app/build/previews/*.png
           if-no-files-found: ignore

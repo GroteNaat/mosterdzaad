@@ -491,7 +491,7 @@ class _EntryEditorState extends State<EntryEditor> {
                   Text(
                     dirty
                         ? 'Er zijn nog niet opgeslagen wijzigingen.'
-                        : 'Je wijzigingen worden bij Opslaan in je studieboekmap bewaard.',
+                        : 'Je wijzigingen worden bij Opslaan in je lokale studieboek bewaard.',
                     style: const TextStyle(color: Colors.black54),
                   ),
                   const SizedBox(height: 12),

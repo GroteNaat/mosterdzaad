@@ -25,3 +25,7 @@ Bouw op macOS met Xcode. `flutter build ios --release --no-codesign` controleert
 ## Controle vóór een publieke release
 
 Op ieder doelplatform: nieuw studieboek maken via systeemkiezer; notitie opslaan; app volledig afsluiten; opnieuw openen; bestaande map openen; annuleren; locatie verplaatsen/verwijderen; toegang intrekken; opslagfout simuleren. Controleer ook langere notities, toetsenbord, schermlezer en grotere tekst. Test Android/iOS met lokale opslag én de specifieke cloudprovider die je wilt ondersteunen. Ondersteuning van een systeemkiezer betekent niet dat iedere provider dezelfde bestandssemantiek heeft.
+
+## PWA en Dropbox
+
+De workflow bouwt ook een statische PWA als `Mosterdzaad-web`. Zie [PWA](PWA.md) voor hosting en offline-updates, en [Dropbox](DROPBOX.md) voor de appregistratie, redirectadressen en controle met echte accounts. De native builds gebruiken dezelfde Dropbox-app key.

@@ -38,4 +38,10 @@ Windows/Linux gebruiken normale lokale paden. Een locatie mag verdwijnen (losgek
 
 ## Grenzen
 
-Deze versie heeft geen ingebouwde versleuteling, realtime samenwerking of automatische cloudsync. Er is geen prullenbak legen of geschiedenis opruimen: dat voorkomt dat synchronisatie of herstel nog benodigde ouders verliest. Handmatige edits aan revisiebestanden zijn geen ondersteunde manier om nieuwe revisies te maken. Oudere Django-JSON-exports en SQLite-databases worden niet geïmporteerd.
+Deze versie heeft geen ingebouwde versleuteling of realtime samenwerking. Optionele Dropbox-sync werkt met complete snapshots en expliciete revisieconflicten; zie [Dropbox](DROPBOX.md). Er is geen prullenbak legen of geschiedenis opruimen: dat voorkomt dat synchronisatie of herstel nog benodigde ouders verliest. Handmatige edits aan revisiebestanden zijn geen ondersteunde manier om nieuwe revisies te maken. Oudere Django-JSON-exports en SQLite-databases worden niet geïmporteerd.
+
+## Browser en snapshots
+
+De PWA bewaart dezelfde manifest- en recordinhoud in IndexedDB (`mosterdzaad-v1`), gescheiden van de service-worker-cache. Nieuwe records worden met een exclusieve `add` geschreven. De boekencatalogus en het manifest worden in dezelfde transactie gepubliceerd. De laatste locatie staat in een aparte settings-store. Tokens staan uitsluitend in geheugen. De browserzoekindex bevat afgeleide tekst in geheugen.
+
+Een snapshot (`mosterdzaad-snapshot`, versie 1) bevat een `files`-map met alleen `mosterdzaad.json` en `records/<revision>.md|json`. Dit formaat wordt gebruikt voor PWA-reservekopieën en Dropbox. Herstel valideert alle records, ouders en de acyclische revisiegrafiek vóór schrijven en publiceert het manifest als laatste. De limiet is 20 MiB per snapshot, 8 MiB per record.

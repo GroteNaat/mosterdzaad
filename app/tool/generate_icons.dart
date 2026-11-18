@@ -59,6 +59,9 @@ void main() {
   ) async {
     await tester.runAsync(() async {
       final targets = <String, int>{
+        'web/favicon.png': 32,
+        'web/icons/Icon-192.png': 192,
+        'web/icons/Icon-512.png': 512,
         for (final entry in {
           'mdpi': 48,
           'hdpi': 72,
