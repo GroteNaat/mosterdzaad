@@ -1,0 +1,284 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import 'package:uuid/uuid.dart';
+import '../domain/bible.dart';
+import '../domain/entry.dart';
+import 'vault_files.dart';
+
+class VaultConflict implements Exception {
+  const VaultConflict(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+class VaultRepository {
+  VaultRepository(this.files, this.bible);
+  final VaultFiles files;
+  final Bible bible;
+  String id = '', name = '';
+  List<Entry> history = [];
+  Map<String, List<Entry>> heads = {};
+  List<String> warnings = [];
+  Map<String, String> _fingerprints = {};
+  Future<void> _queue = Future.value();
+  List<Entry> get entries =>
+      heads.values
+          .where((v) => v.length == 1 && !v.first.deleted)
+          .map((v) => v.first)
+          .toList()
+        ..sort((a, b) => b.updated.compareTo(a.updated));
+  List<List<Entry>> get conflicts =>
+      heads.values.where((v) => v.length > 1).toList();
+  String get scheme =>
+      entries
+          .where((e) => e.kind == 'preferences')
+          .firstOrNull
+          ?.text('versification') ??
+      'english';
+  bool get extra =>
+      entries
+              .where((e) => e.kind == 'preferences')
+              .firstOrNull
+              ?.data['deuterocanonical']
+          as bool? ??
+      false;
+  List<Entry> ofKind(String kind) =>
+      entries.where((e) => e.kind == kind).toList();
+  // History also fixes the scheme: old versions must retain their meaning.
+  bool get hasPassages => history.any(
+    (e) =>
+        e.passages.isNotEmpty ||
+        e.sessions.any((s) => (s['passages'] as List).isNotEmpty),
+  );
+
+  static Future<VaultRepository> create(
+    VaultFiles files,
+    Bible bible,
+    String name,
+    String scheme,
+    bool extra,
+  ) async {
+    if (name.trim().isEmpty || name.length > 100) {
+      throw const FormatException(
+        'Geef je studieboek een naam van maximaal 100 tekens.',
+      );
+    }
+    if (await files.read('mosterdzaad.json') != null) {
+      throw const FormatException(
+        'Deze map bevat al een studieboek. Open het bestaande studieboek.',
+      );
+    }
+    final repo = VaultRepository(files, bible)
+      ..id = const Uuid().v4()
+      ..name = name.trim();
+    await files.makeDirectory('records');
+    await files.writeNew(
+      'mosterdzaad.json',
+      '${jsonEncode({'format': 'mosterdzaad-studybook', 'version': 1, 'id': repo.id, 'name': repo.name, 'created': DateTime.now().toUtc().toIso8601String()})}\n',
+    );
+    await repo.reload();
+    await repo.save('preferences', {
+      'versification': scheme,
+      'deuterocanonical': extra,
+    }, entityId: repo.id);
+    return repo;
+  }
+
+  Future<void> reload() async {
+    final manifest = await files.read('mosterdzaad.json');
+    if (manifest == null) {
+      throw const FormatException(
+        'Deze map is geen Mosterdzaad-studieboek. Selecteer de map met mosterdzaad.json.',
+      );
+    }
+    final j = jsonDecode(manifest) as Map;
+    if (j['format'] != 'mosterdzaad-studybook' ||
+        j['version'] != 1 ||
+        j['id'] is! String ||
+        !uuidPattern.hasMatch(j['id'] as String) ||
+        j['name'] is! String) {
+      throw const FormatException(
+        'Dit studieboekformaat wordt niet ondersteund.',
+      );
+    }
+    if (id.isNotEmpty && j['id'] != id) {
+      throw const VaultConflict(
+        'De map bevat inmiddels een ander studieboek. Open het opnieuw.',
+      );
+    }
+    final records = <Entry>[];
+    final problems = <String>[];
+    final prints = <String, String>{};
+    final names = await files.list('records');
+    if (names.length > 100000) {
+      throw const FormatException(
+        'Dit studieboek bevat te veel revisiebestanden.',
+      );
+    }
+    for (final filename in names.where(
+      (f) => f.endsWith('.md') || f.endsWith('.json'),
+    )) {
+      try {
+        final contents = await files.read('records/$filename');
+        if (contents == null) {
+          throw const FormatException('Bestand verdwenen tijdens openen.');
+        }
+        final entry = Entry.decode(contents, filename);
+        if (entry.kind == 'preferences' && entry.id != j['id']) {
+          throw const FormatException('Ongeldige instellingen-ID.');
+        }
+        records.add(entry);
+        prints[entry.revision] = sha256
+            .convert(utf8.encode(contents))
+            .toString();
+      } catch (e) {
+        // Denied access is not an empty studybook. Propagate I/O failures.
+        if (e is! FormatException && e is! TypeError) rethrow;
+        problems.add(
+          '$filename: onvolledig of ongeldig. Het bestand is behouden.',
+        );
+      }
+    }
+    final candidateHeads = revisionHeads(records);
+    final prefs = candidateHeads[j['id']];
+    if (prefs != null && prefs.length > 1) {
+      throw const VaultConflict(
+        'Er zijn conflicterende instellingen. Herstel de studieboekmap vanuit een consistente kopie.',
+      );
+    }
+    final currentScheme = prefs?.first.text('versification') ?? 'english';
+    final types = <String, String>{};
+    final byRevision = {for (final r in records) r.revision: r};
+    for (final record in records) {
+      if (!record.deleted) {
+        validateData(record.kind, record.data, bible, currentScheme);
+      }
+      if (types.containsKey(record.id) && types[record.id] != record.kind) {
+        throw const FormatException('Een record verandert van type.');
+      }
+      types[record.id] = record.kind;
+      for (final parent in record.parents) {
+        if (!byRevision.containsKey(parent) ||
+            byRevision[parent]!.id != record.id) {
+          throw const FormatException(
+            'Er ontbreken eerdere revisies in het studieboek.',
+          );
+        }
+      }
+    }
+    if (candidateHeads.values.any((h) => h.isEmpty)) {
+      throw const FormatException('Ongeldige revisiegeschiedenis.');
+    }
+    id = j['id'] as String;
+    name = j['name'] as String;
+    history = records;
+    heads = candidateHeads;
+    warnings = problems;
+    _fingerprints = prints;
+  }
+
+  Future<Entry> save(
+    String kind,
+    Map<String, dynamic> data, {
+    String? entityId,
+    List<String> expected = const [],
+    Map<String, String>? expectedHashes,
+    bool deleted = false,
+  }) {
+    final beforePrints =
+        expectedHashes ?? Map<String, String>.from(_fingerprints);
+    final result = _queue.then((_) async {
+      await reload();
+      if (warnings.isNotEmpty) {
+        throw const VaultConflict(
+          'Er zijn onvolledige bestanden. Herstel deze eerst; je invoer blijft in dit venster staan.',
+        );
+      }
+      final targetId = entityId ?? const Uuid().v4();
+      if (!uuidPattern.hasMatch(targetId) ||
+          !entryKinds.contains(kind) ||
+          (kind == 'preferences' && (targetId != id || deleted))) {
+        throw const FormatException('Ongeldige record-identiteit.');
+      }
+      final current = heads[targetId] ?? [];
+      final actual = current.map((e) => e.revision).toSet();
+      if (actual.length != expected.length ||
+          !actual.containsAll(expected) ||
+          expected.any((r) => beforePrints[r] != _fingerprints[r])) {
+        throw const VaultConflict(
+          'Dit onderdeel is elders gewijzigd. Je tekst is nog aanwezig. Kopieer je tekst en open de nieuwste versie voordat je opslaat.',
+        );
+      }
+      if (kind == 'preferences' &&
+          hasPassages &&
+          data['versification'] != scheme) {
+        throw const FormatException(
+          'De versindeling staat vast zodra er passages zijn opgeslagen.',
+        );
+      }
+      if (deleted &&
+          kind == 'group' &&
+          ofKind('study').any((e) => e.data['group'] == targetId)) {
+        throw const FormatException(
+          'Deze groep wordt nog gebruikt door een studie.',
+        );
+      }
+      if (!deleted) {
+        validateData(
+          kind,
+          data,
+          bible,
+          kind == 'preferences' ? data['versification'] as String : scheme,
+        );
+        if (['theme', 'group'].contains(kind) &&
+            ofKind(kind).any(
+              (e) =>
+                  e.id != targetId &&
+                  e.text('name').toLowerCase() ==
+                      (data['name'] as String).trim().toLowerCase(),
+            )) {
+          throw const FormatException('Deze naam bestaat al.');
+        }
+        for (final pair in {
+          'themes': 'theme',
+          'plans': 'plan',
+          'studies': 'study',
+        }.entries) {
+          for (final link in data[pair.key] as List? ?? []) {
+            if (!ofKind(pair.value).any((e) => e.id == link)) {
+              throw const FormatException(
+                'Een gekoppeld onderdeel is verwijderd of heeft een conflict.',
+              );
+            }
+          }
+        }
+        if (kind == 'study' &&
+            data['kind'] == 'group' &&
+            !ofKind('group').any((e) => e.id == data['group'])) {
+          throw const FormatException('Kies een bestaande groep.');
+        }
+      }
+      final record = Entry(
+        id: targetId,
+        revision: const Uuid().v4(),
+        parents: expected,
+        kind: kind,
+        data: Map<String, dynamic>.from(jsonDecode(jsonEncode(data)) as Map),
+        updated: DateTime.now().toUtc(),
+        deleted: deleted,
+      );
+      final encoded = record.encode();
+      await files.writeNew('records/${record.filename}', encoded);
+      if (await files.read('records/${record.filename}') != encoded) {
+        throw const VaultConflict(
+          'Het bestand kon niet volledig worden teruggelezen. Je invoer is behouden; controleer de map.',
+        );
+      }
+      await reload();
+      return record;
+    });
+    _queue = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
+  }
+}

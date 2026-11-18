@@ -1,0 +1,113 @@
+name: Native apps
+on:
+  push:
+    branches: [main, codex/flutter-local-app]
+    paths: ['app/**', '.github/workflows/flutter.yml']
+  pull_request:
+    paths: ['app/**', '.github/workflows/flutter.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: flutter-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, target: linux}
+          - {os: windows-latest, target: windows}
+          - {os: macos-latest, target: apple}
+          - {os: ubuntu-latest, target: android}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      PUB_CACHE: ${{ runner.temp }}/mosterdzaad-pub
+      SDK_DIR: ${{ runner.temp }}/mosterdzaad-flutter
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: flutter-cache
+        with:
+          path: ${{ env.SDK_DIR }}
+          key: flutter-3.50.0-${{ runner.os }}-${{ runner.arch }}
+      - name: Install pinned Flutter SDK
+        shell: bash
+        run: |
+          if [ ! -d "$SDK_DIR/.git" ]; then
+            git clone --depth 1 --branch 3.50.0 https://github.com/flutter/flutter.git "$SDK_DIR"
+          fi
+          echo "$SDK_DIR/bin" >> "$GITHUB_PATH"
+          "$SDK_DIR/bin/flutter" --suppress-analytics --version
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.PUB_CACHE }}
+          key: pub-${{ runner.os }}-${{ hashFiles('app/pubspec.lock') }}
+      - name: Linux build dependencies
+        if: matrix.target == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - uses: actions/setup-java@v4
+        if: matrix.target == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        if: matrix.target == 'android'
+      - run: flutter --suppress-analytics pub get --enforce-lockfile
+      - name: Analyze and test
+        if: matrix.target == 'linux'
+        run: |
+          dart format --output=none --set-exit-if-changed lib test
+          flutter --suppress-analytics analyze --no-pub
+          flutter --suppress-analytics test --no-pub
+      - name: Build Linux
+        if: matrix.target == 'linux'
+        run: |
+          flutter --suppress-analytics build linux --release
+          mkdir -p build/packages
+          tar -C build/linux/x64/release/bundle -czf build/packages/Mosterdzaad-linux-x64.tar.gz .
+          bash packaging/linux/package-deb.sh
+      - name: Build Windows installer
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          flutter --suppress-analytics build windows --release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force build/packages | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath build/packages/Mosterdzaad-windows-x64.zip
+          $compiler = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path -LiteralPath $compiler)) { choco install innosetup -y --no-progress }
+          & $compiler packaging/windows/installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build macOS and iOS
+        if: matrix.target == 'apple'
+        run: |
+          flutter --suppress-analytics build macos --release
+          mkdir -p build/packages
+          hdiutil create -volname Mosterdzaad -srcfolder build/macos/Build/Products/Release/mosterdzaad.app -ov -format UDZO build/packages/Mosterdzaad-macos.dmg
+          flutter --suppress-analytics build ios --release --no-codesign
+          ditto -c -k --sequesterRsrc --keepParent build/ios/iphoneos/Runner.app build/packages/Mosterdzaad-ios-UNSIGNED.zip
+      - name: Build Android test APK
+        if: matrix.target == 'android'
+        run: |
+          flutter --suppress-analytics build apk --debug
+          mkdir -p build/packages
+          cp build/app/outputs/flutter-apk/app-debug.apk build/packages/Mosterdzaad-android-test.apk
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: Mosterdzaad-${{ matrix.target }}
+          path: app/build/packages/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.target == 'linux'
+        with:
+          name: interface-previews
+          path: app/build/previews/*.png
+          if-no-files-found: ignore

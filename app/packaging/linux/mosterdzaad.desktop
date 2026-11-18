@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Mosterdzaad
+Comment=Lees in je Bijbel. Bewaar hier wat groeit.
+Exec=/opt/mosterdzaad/mosterdzaad
+Icon=mosterdzaad
+Terminal=false
+Type=Application
+Categories=Education;Office;
