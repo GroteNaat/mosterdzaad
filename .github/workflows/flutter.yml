@@ -24,14 +24,20 @@ jobs:
           - {os: ubuntu-latest, target: android}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
-    env:
-      PUB_CACHE: ${{ runner.temp }}/mosterdzaad-pub
-      SDK_DIR: ${{ runner.temp }}/mosterdzaad-flutter
     defaults:
       run:
         working-directory: app
     steps:
       - uses: actions/checkout@v4
+      - name: Configure build directories
+        shell: bash
+        run: |
+          build_temp="$RUNNER_TEMP"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            build_temp="$(cygpath -m "$RUNNER_TEMP")"
+          fi
+          echo "PUB_CACHE=$build_temp/mosterdzaad-pub" >> "$GITHUB_ENV"
+          echo "SDK_DIR=$build_temp/mosterdzaad-flutter" >> "$GITHUB_ENV"
       - uses: actions/cache@v4
         id: flutter-cache
         with:
