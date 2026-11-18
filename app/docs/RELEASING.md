@@ -8,7 +8,7 @@ Gebruik Flutter 3.50.0 en het vastgelegde pubspec.lock. De GitHub-workflow lever
 
 ## Windows
 
-`flutter build windows --release`. De volledige Release-map moet meegeleverd worden, inclusief DLL’s en data. Inno Setup maakt met `packaging/windows/installer.iss` een installer per gebruiker, zonder administratorrechten. De installer verwijdert bij deïnstallatie geen zelfgekozen studieboekmappen. Codesigning voor publieke distributie is een afzonderlijke stap.
+`flutter build windows --release`. De volledige Release-map moet meegeleverd worden, inclusief DLL’s en data. CMake neemt de Visual C++-runtime uit de compilerinstallatie mee; CI controleert dat deze aanwezig is. Inno Setup maakt met `packaging/windows/installer.iss` een installer per gebruiker, zonder administratorrechten. De installer verwijdert bij deïnstallatie geen zelfgekozen studieboekmappen. Codesigning voor publieke distributie is een afzonderlijke stap.
 
 ## macOS
 
@@ -20,7 +20,7 @@ Bouw op macOS met Xcode. `flutter build ios --release --no-codesign` controleert
 
 ## Linux
 
-`flutter build linux --release`. De portable tar bevat het gehele Flutter-bundle. `bash packaging/linux/package-deb.sh` maakt een Debian/Ubuntu-pakket. De build is x64 en hangt af van de systeemlibraries van de gekozen bouwdistributie; test op de oudste distributie die je officieel wilt ondersteunen.
+`flutter build linux --release`. De portable tar bevat het gehele Flutter-bundle. `bash packaging/linux/package-deb.sh` maakt een Debian/Ubuntu-pakket. CI bouwt op Ubuntu 22.04 x64 (glibc 2.35); de binaries vragen een compatibele of nieuwere distributie met GTK 3. Test ook op de specifieke distributies die je officieel wilt ondersteunen.
 
 ## Controle vóór een publieke release
 

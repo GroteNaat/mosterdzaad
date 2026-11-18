@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-latest, target: linux}
+          - {os: ubuntu-22.04, target: linux}
           - {os: windows-latest, target: windows}
           - {os: macos-latest, target: apple}
           - {os: ubuntu-latest, target: android}
@@ -88,6 +88,9 @@ jobs:
         run: |
           flutter --suppress-analytics build windows --release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($runtime in @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')) {
+            if (-not (Test-Path "build/windows/x64/runner/Release/$runtime")) { throw "Missing runtime: $runtime" }
+          }
           New-Item -ItemType Directory -Force build/packages | Out-Null
           Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath build/packages/Mosterdzaad-windows-x64.zip
           $compiler = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'

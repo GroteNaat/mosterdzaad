@@ -10,7 +10,7 @@ Package: mosterdzaad
 Version: 0.2.0
 Architecture: amd64
 Maintainer: Mosterdzaad <noreply@mosterdzaad.local>
-Depends: libgtk-3-0, libstdc++6
+Depends: libgtk-3-0, libstdc++6, libc6 (>= 2.35)
 Section: utils
 Priority: optional
 Description: Persoonlijke Bijbelstudie met lokale studieboekmappen.
