@@ -1,5 +1,7 @@
 import 'dart:js_interop';
+
 import 'package:web/web.dart' as web;
+
 import '../storage/search_index_web.dart';
 
 Future<String> supportPath() async => '';

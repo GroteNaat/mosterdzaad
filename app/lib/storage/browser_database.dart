@@ -1,5 +1,7 @@
 import 'dart:convert';
+
 import 'package:idb_shim/idb_shim.dart';
+
 import 'vault_types.dart';
 
 /// Records and the book catalogue live in IndexedDB, never in the app cache.

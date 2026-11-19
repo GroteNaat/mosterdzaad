@@ -1,47 +1,36 @@
-# Studieboekformaat v1
+# Lokale studieboeken en herstel
 
-De gekozen map is de bron van waarheid:
+De gekozen map blijft de onversleutelde bron van waarheid. In de PWA staat dezelfde inhoud in IndexedDB. De native SQLite-zoekindex en browserzoekindex zijn afgeleide caches; ze bevatten leesbare persoonlijke tekst.
 
 ```text
-Mijn studieboek-<id>/
-  mosterdzaad.json
-  records/
-    <revisie-uuid>.md
-    <revisie-uuid>.json
+mosterdzaad.json
+records/
+  format-v2.json
+  <poging-uuid>.pending
+  <poging-uuid>.commit
+  <oude-revisie-uuid>.md|json
 ```
 
-`mosterdzaad.json` bevat `format: mosterdzaad-studybook`, `version: 1`, een studieboek-UUID, naam en aanmaakdatum. Dit bestand wordt bij het maken geschreven en niet overschreven.
+Het manifest (mosterdzaad-studybook, versie 1) houdt de oorspronkelijke boek-ID, naam en aanmaakdatum. Nieuwe records zijn versie 2, met object-ID, operatie-/revisie-ID, causale ouders, apparaat-actor, oorspronkelijke aanmaakdatum, tombstone en een Loro-update. De volledige lokale tekst staat er ook in. Notities gebruiken JSON-frontmatter en Markdown met een eindmarkering; andere records zijn JSON.
 
-Iedere wijziging maakt een nieuw bestand met een willekeurige revisie-UUID. De envelope bevat `format: mosterdzaad-record`, `version: 1`, de stabiele object-UUID (`id`), `revision`, `parents`, `kind`, UTC-tijd, `deleted` en `data`. Notities gebruiken JSON als YAML-compatible frontmatter tussen twee `---`-regels, gevolgd door de Markdowntekst en een `<!-- mosterdzaad:end -->`-eindmarkering. Die markering helpt een onderbroken schrijfactie herkennen. De andere recordtypen zijn JSON: plan, study, theme, group en preferences.
+Een write maakt eerst een nieuwe .pending-poging, leest die volledig terug en publiceert vervolgens een .commit-marker met bestandsnaam en SHA-256. Alleen een complete marker publiceert de wijziging. Een crash vóór publicatie laat de vorige toestand geldig; een retry gebruikt een nieuwe poging-ID. Een beschadigde gepubliceerde wijziging veroorzaakt een fout, nooit een lege vervangende database. Ontvangen batches worden eerst volledig gevalideerd en daarna in causale volgorde gepubliceerd. Onderbroken batches kunnen veilig opnieuw worden aangeboden.
 
-De huidige versies zijn de bladeren van de revisiegrafiek per object. Er wordt niet automatisch de versie met de nieuwste kloktijd gekozen. Twee bladeren betekenen een conflict; beide blijven behouden totdat de gebruiker een nieuwe versie schrijft met beide revisies als ouders. Verwijderen is een nieuwe revisie met `deleted: true`; herstel maakt weer een gewone revisie. Eerdere versies worden niet fysiek verwijderd.
+V1-revisies blijven ongewijzigd en worden deterministisch naar Loro-bewerkingen vertaald bij lezen. format-v2.json zorgt dat oude clients het boek als niet-ondersteund behandelen en schrijven/synchroniseren blokkeren. Open een bijgewerkt studieboek niet met een oudere app. Er is geen import uit de oude Django-app toegevoegd.
 
-De app leest vlak vóór schrijven de map opnieuw. Verwachte revisie-ID’s en inhoudshashes beschermen tegen verouderde edits. Nieuwe bestanden worden exclusief aangemaakt, nooit in plaats van een bestaand bestand. Na schrijven wordt de inhoud teruggelezen. Providers kunnen niet allemaal atomisch schrijven; onvolledige bestanden blijven zichtbaar als herstelmelding en blokkeren verdere wijzigingen totdat de map is hersteld. I/O- of toestemmingsfouten worden niet behandeld als een leeg studieboek.
+Loro voegt tekst en koppelingen samen. Verschillende gelijktijdige metadatawaarden blijven als alternatieven zichtbaar. Verwijderen wint van een gelijktijdige edit, met de samengestelde tekst in de prullenbak. Expliciet herstellen schrijft een nieuwe operatie; eerdere versies blijven behouden. Zie [het protocol](ENCRYPTED-SYNC.md) voor de precieze regels.
 
-## Herstel
+## Back-ups
 
-1. Bewaar een kopie van de gehele map voordat je herstelwerk doet.
-2. Gebruik bij gewone verwijderingen de prullenbak; bij ongewenste edits de versiegeschiedenis.
-3. Kies bij een conflict expliciet een versie. Kopieer zo nodig tekst uit beide versies voordat je kiest.
-4. Herstel bij onvolledige/ontbrekende revisies de map uit een consistente back-up. Verwijder niet willekeurig eerdere revisies: latere bestanden verwijzen naar hun ouders.
-5. Bij een ontbrekende of verplaatste locatie kies je opnieuw de map met `mosterdzaad.json`.
+Kopieer de **hele map**, inclusief commitmarkers en pending-bestanden waarnaar ze verwijzen. De PWA kan een plaintextreservekopie downloaden; behandel dat bestand als persoonlijke gegevens. Cloudback-ups zijn afzonderlijk versleuteld.
 
-De SQLite-index is alleen een cache op het apparaat. Bij het openen wordt deze opnieuw gevuld. Er worden geen actieve SQLitebestanden in een cloudmap gedeeld. De cache bevat tekst en moet, net als het studieboek, als persoonlijke gegevens worden behandeld.
+Het portable formaat mosterdzaad-snapshot, versie 1, bevat uitsluitend het manifest en canonieke records/<revision>.md|json-inhoud. De lokale commitstructuur wordt hiervoor uitgepakt. Maprechten, SQLite, OAuth en DEK ontbreken. Herstel valideert alle records, ouders en de acyclische grafiek en publiceert het manifest als laatste in een nieuwe map. Een cloudherstelpunt wordt als afzonderlijk boek geopend zodat nieuwere wijzigingen behouden blijven.
 
-## Platformtoegang
+Een volledige cloudback-up inclusief CRDT-geschiedenis en controlemetadata is maximaal 20 MiB. Individuele lokale records zijn begrensd tot 8 MiB. Er is geen fysieke verwijdering van lokale tombstones/geschiedenis. Handmatige edits zijn geen ondersteunde manier om nieuwe wijzigingen te maken.
 
-Android bewaart de oorspronkelijke SAF-tree-URI en de document-ID van de studieboekmap. De persistente grant hoort bij de oorspronkelijke geselecteerde tree. Een content-URI wordt niet omgezet in een verzonnen lokaal bestandspad.
+## Sleutels, status en platformtoegang
 
-Apple bewaart een security-scoped bookmark en activeert die tijdens bewerkingen. Lezen en schrijven gebruikt NSFileCoordinator. Een stale bookmark of ingetrokken toegang geeft een fout en vraagt opnieuw mapkeuze. De macOS-app heeft sandboxrechten voor door de gebruiker geselecteerde bestanden en bookmarks.
+De per-apparaat synchronisatiejournal staat buiten de studieboekmap in app-supportopslag, of in de IndexedDB-settings-store. Hij bevat cursor, bevestigde hashes en een versleutelde outbox. Native statusupdates worden via een geschreven en geflushte tijdelijke versie vervangen; schrijfacties per sleutel worden geserialiseerd. OAuth-refresh-token en DEK staan in aparte beveiligde opslag, nooit in de journal of exports.
 
-Windows/Linux gebruiken normale lokale paden. Een locatie mag verdwijnen (losgekoppelde schijf, verplaatste map); de app maakt dan niet automatisch een vervangende database.
+Android gebruikt de oorspronkelijke SAF-tree-URI en persistente grant. Apple gebruikt security-scoped bookmarks en NSFileCoordinator. Windows/Linux gebruiken echte lokale paden. Een ingetrokken toestemming of verdwenen schijf wordt niet als een leeg boek behandeld.
 
-## Grenzen
-
-Deze versie heeft geen ingebouwde versleuteling of realtime samenwerking. Optionele Dropbox-sync werkt met complete snapshots en expliciete revisieconflicten; zie [Dropbox](DROPBOX.md). Er is geen prullenbak legen of geschiedenis opruimen: dat voorkomt dat synchronisatie of herstel nog benodigde ouders verliest. Handmatige edits aan revisiebestanden zijn geen ondersteunde manier om nieuwe revisies te maken. Oudere Django-JSON-exports en SQLite-databases worden niet geïmporteerd.
-
-## Browser en snapshots
-
-De PWA bewaart dezelfde manifest- en recordinhoud in IndexedDB (`mosterdzaad-v1`), gescheiden van de service-worker-cache. Nieuwe records worden met een exclusieve `add` geschreven. De boekencatalogus en het manifest worden in dezelfde transactie gepubliceerd. De laatste locatie staat in een aparte settings-store. Tokens staan uitsluitend in geheugen. De browserzoekindex bevat afgeleide tekst in geheugen.
-
-Een snapshot (`mosterdzaad-snapshot`, versie 1) bevat een `files`-map met alleen `mosterdzaad.json` en `records/<revision>.md|json`. Dit formaat wordt gebruikt voor PWA-reservekopieën en Dropbox. Herstel valideert alle records, ouders en de acyclische revisiegrafiek vóór schrijven en publiceert het manifest als laatste. De limiet is 20 MiB per snapshot, 8 MiB per record.
+De browser vraagt persistente opslag aan, maar de browser mag dat weigeren. Websitegegevens wissen of opslagdruk kan zowel notities als lokale sleutels verwijderen. De service-worker-cache bevat uitsluitend appassets. Houd een werkende back-up en bewaar het versleutelingswachtwoord onafhankelijk.

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
@@ -9,14 +10,15 @@ const dropboxAppKey = String.fromEnvironment(
 );
 
 class DropboxSession {
-  const DropboxSession(this.accessToken, this.expiresAt);
+  const DropboxSession(this.accessToken, this.expiresAt, [this.refreshToken]);
   final String accessToken;
   final DateTime expiresAt;
+  final String? refreshToken;
   bool get valid =>
       DateTime.now().isBefore(expiresAt.subtract(const Duration(minutes: 1)));
 }
 
-/// Single-use PKCE challenge. No client secret, no persistent access/refresh token.
+/// Single-use PKCE challenge. Public clients never contain an app secret.
 class DropboxAuthorization {
   DropboxAuthorization({
     required this.redirect,
@@ -44,7 +46,7 @@ class DropboxAuthorization {
     'code_challenge': challenge,
     'code_challenge_method': 'S256',
     'state': state,
-    'token_access_type': 'online',
+    'token_access_type': 'offline',
     'scope': 'files.metadata.read files.content.read files.content.write',
   });
 
@@ -96,6 +98,34 @@ class DropboxAuthorization {
       DateTime.now().add(
         Duration(seconds: (json['expires_in'] as num).toInt()),
       ),
+      json['refresh_token'] as String?,
     );
   }
+}
+
+Future<DropboxSession> refreshDropbox(
+  String refreshToken,
+  http.Client client,
+) async {
+  final response = await client
+      .post(
+        Uri.https('api.dropboxapi.com', '/oauth2/token'),
+        body: {
+          'grant_type': 'refresh_token',
+          'refresh_token': refreshToken,
+          'client_id': dropboxAppKey,
+        },
+      )
+      .timeout(const Duration(seconds: 30));
+  if (response.statusCode != 200) {
+    throw const FormatException(
+      'Dropbox-aanmelding verlopen. Koppel opnieuw; je lokale wijzigingen zijn bewaard.',
+    );
+  }
+  final json = jsonDecode(response.body) as Map;
+  return DropboxSession(
+    json['access_token'] as String,
+    DateTime.now().add(Duration(seconds: (json['expires_in'] as num).toInt())),
+    refreshToken,
+  );
 }

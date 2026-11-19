@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
+
 import 'platform/platform_services.dart';
 import 'app_controller.dart';
 import 'domain/bible.dart';
@@ -22,6 +23,15 @@ Future<void> main() async {
       yield LicenseEntryWithLineBreaks([
         'Roboto',
       ], await rootBundle.loadString('assets/fonts/roboto_license.txt'));
+      for (final name in [
+        'loro-license',
+        'loro-third-party',
+        'libsodium-license',
+      ]) {
+        yield LicenseEntryWithLineBreaks([
+          name,
+        ], await rootBundle.loadString('assets/licenses/$name.txt'));
+      }
     });
     final app = AppController(
       bible: Bible(english, original),

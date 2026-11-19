@@ -1,9 +1,14 @@
 import 'dart:async';
+
+import 'package:sodium/sodium_sumo.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
+
 import 'platform/platform_services.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
+
 import 'domain/bible.dart';
 import 'domain/entry.dart';
 import 'storage/vault_files.dart';
@@ -11,8 +16,11 @@ import 'storage/vault_repository.dart';
 import 'storage/search_index.dart';
 import 'storage/vault_snapshot.dart';
 import 'sync/dropbox_auth.dart';
-import 'sync/dropbox_client.dart';
-import 'sync/sync_engine.dart';
+import 'sync/crypto_box.dart';
+import 'sync/encrypted_cloud.dart';
+import 'sync/encrypted_sync.dart';
+import 'sync/local_state.dart';
+import 'sync/background_sync.dart';
 
 String describeError(Object error) => error is FormatException
     ? error.message
@@ -36,126 +44,290 @@ class AppController extends ChangeNotifier {
   bool busy = false;
   String? error, notice;
   DropboxSession? _dropboxSession;
-  final _syncBooks = <String>{};
+  String? _refreshToken;
+  final _secrets = SecretStore();
+  late final _state = LocalStateStore(supportDirectory);
+  late final _crypto = Future<SodiumSumo>.sync(SodiumSumoInit.init)
+      .then(CryptoBox.new);
+  final _http = http.Client();
+  SyncJournal? _journal;
+  SecureKey? _dataKey;
   Timer? _syncDelay, _syncPoll;
-  bool syncing = false;
+  http.Client? _watchClient;
+  int _watchGeneration = 0;
+  bool syncing = false, syncOffline = false;
   String? syncError;
   DateTime? lastSynced;
-  bool get dropboxConnected => _dropboxSession?.valid ?? false;
-  bool get syncEnabled => _syncBooks.contains(repository?.id);
+  DateTime? get lastBackup => _journal?.lastBackup;
+  int get pendingChanges => _journal == null
+      ? 0
+      : repository?.history
+                .where((e) => !_journal!.acknowledged.containsKey(e.revision))
+                .length ??
+            0;
+  bool get dropboxConnected => _dropboxSession != null || _refreshToken != null;
+  bool get syncEnabled =>
+      _journal != null && _dataKey != null && repository != null;
   String get dropboxRedirect => oauthRedirect;
-  DropboxClient _cloud(http.Client client) {
-    if (!dropboxConnected) {
-      throw const DropboxFailure(
-        'Meld opnieuw aan bij Dropbox.',
-        unauthorized: true,
-      );
+  Future<EncryptedSync> _engine([http.Client? client]) async => EncryptedSync(
+    DropboxObjects(client ?? _http, _token),
+    await _crypto,
+    _state,
+    _secrets,
+    bible,
+  );
+
+  Future<String> _token(bool force) async {
+    if (!force && _dropboxSession?.valid == true) {
+      return _dropboxSession!.accessToken;
     }
-    return DropboxClient(client, _dropboxSession!.accessToken);
+    _refreshToken ??= await _secrets.read('dropbox-refresh');
+    if (_refreshToken == null) {
+      throw const DropboxFailure('Koppel Dropbox opnieuw.', unauthorized: true);
+    }
+    _dropboxSession = await refreshDropbox(_refreshToken!, _http);
+    return _dropboxSession!.accessToken;
   }
 
   Future<void> connectDropbox() async {
-    if (dropboxAppKey.isEmpty) {
-      throw const FormatException('Deze build heeft nog geen Dropbox-app key.');
-    }
     final auth = DropboxAuthorization(redirect: oauthRedirect);
-    // Launch directly from the tap: iOS blocks popups after unrelated async work.
     final callback = await FlutterWebAuth2.authenticate(
       url: auth.url.toString(),
       callbackUrlScheme: oauthLoopback ? oauthRedirect : 'nl.mosterdzaad',
       options: const FlutterWebAuth2Options(
         useWebview: false,
         timeout: 180,
-        landingPageHtml:
-            '<!doctype html><html lang="nl"><meta charset="utf-8"><title>Mosterdzaad</title><p>Keer terug naar Mosterdzaad om de aanmelding af te ronden.</p></html>',
+        landingPageHtml: '<!doctype html><html lang="nl"><meta charset="utf-8"><title>Mosterdzaad</title><p>Keer terug naar Mosterdzaad.</p></html>',
       ),
     );
-    final client = http.Client();
-    try {
-      _dropboxSession = await auth.exchange(callback, client);
-      syncError = null;
-      _syncPoll?.cancel();
-      _syncPoll = Timer.periodic(const Duration(minutes: 1), (_) {
-        if (syncEnabled) unawaited(syncNow());
-      });
-      notifyListeners();
-    } finally {
-      client.close();
+    _dropboxSession = await auth.exchange(callback, _http);
+    _refreshToken = _dropboxSession!.refreshToken;
+    if (_refreshToken != null) {
+      await _secrets.write('dropbox-refresh', _refreshToken!);
+    }
+    syncError = null;
+    _startAutomaticSync();
+    notifyListeners();
+  }
+
+  Future<void> _resumeSync() async {
+    _stopWatch();
+    _dataKey?.dispose();
+    _dataKey = null;
+    _journal = null;
+    final repo = repository;
+    if (repo == null) return;
+    final stored = await _state.read('book-${repo.id}');
+    if (stored == null) return; // Purely local users never need a keychain.
+    _refreshToken ??= await _secrets.read('dropbox-refresh');
+    final binding = await (await _engine()).load(repo.id);
+    if (binding == null || repository != repo) {
+      binding?.$2.dispose();
+      return;
+    }
+    _journal = binding.$1;
+    _dataKey = binding.$2;
+    repo.actor = _journal!.actor;
+    lastSynced = _journal!.lastSuccess;
+    if (dropboxConnected) {
+      _startAutomaticSync();
+      unawaited(syncNow());
     }
   }
 
-  Future<void> enableSync() async {
+  Future<void> enableSync(String password) async {
     final repo = repository;
     if (repo == null) return;
     if (!dropboxConnected) await connectDropbox();
-    if (repository != repo) return;
-    _syncBooks.add(repo.id);
-    await syncNow();
+    final binding = await (await _engine()).create(repo, password);
+    _dataKey?.dispose();
+    _journal = binding.$1;
+    _dataKey = binding.$2;
+    _startAutomaticSync();
+    await syncNow(rethrowErrors: true);
   }
 
-  void disconnectDropbox() {
+  Future<void> disconnectDropbox() async {
     if (syncing) return;
     _syncDelay?.cancel();
     _syncPoll?.cancel();
+    _stopWatch();
+    await _secrets.delete('dropbox-refresh');
+    await cancelBackground();
+    if (_journal != null) await _secrets.delete('dek/${_journal!.dataset}');
+    _dataKey?.dispose();
+    _dataKey = null;
+    _journal = null;
     _dropboxSession = null;
-    _syncBooks.clear();
+    _refreshToken = null;
     syncError = null;
     lastSynced = null;
     notifyListeners();
   }
 
-  Future<void> syncNow() async {
-    final repo = repository;
-    if (syncing || repo == null || !syncEnabled) return;
+  void _stopWatch() {
+    _watchGeneration++;
+    _watchClient?.close();
+    _watchClient = null;
+  }
+
+  void _startAutomaticSync() {
+    _syncPoll?.cancel();
+    // Retry after connectivity returns, including browsers without online events.
+    _syncPoll = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (syncEnabled) unawaited(syncNow());
+    });
+    _stopWatch();
+    if (syncEnabled && dropboxConnected) unawaited(_watch(_watchGeneration));
+  }
+
+  Future<void> _watch(int generation) async {
+    final client = http.Client();
+    _watchClient = client;
+    try {
+      final cloud = DropboxObjects(client, _token);
+      while (generation == _watchGeneration &&
+          syncEnabled &&
+          dropboxConnected) {
+        final cursor = _journal!.cursor;
+        if (cursor.isEmpty) {
+          await Future<void>.delayed(const Duration(seconds: 3));
+          continue;
+        }
+        try {
+          final result = await cloud.poll(cursor);
+          if (generation != _watchGeneration) break;
+          if (result.changed) await syncNow();
+          if (result.backoff > 0) {
+            await Future<void>.delayed(Duration(seconds: result.backoff));
+          }
+        } on CursorReset {
+          if (generation != _watchGeneration) break;
+          _journal!.cursor = '';
+          await syncNow();
+        } catch (_) {
+          await Future<void>.delayed(const Duration(seconds: 20));
+        }
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> syncNow({bool rethrowErrors = false}) async {
+    final repo = repository, journal = _journal, key = _dataKey;
+    if (syncing ||
+        (!rethrowErrors && busy) ||
+        repo == null ||
+        journal == null ||
+        key == null) {
+      return;
+    }
     syncing = true;
     syncError = null;
     notifyListeners();
-    final client = http.Client();
     try {
-      await SyncEngine(_cloud(client)).synchronize(repo);
-      if (repository == repo) {
-        lastSynced = DateTime.now();
-        await rebuildIndex();
-      }
+      await (await _engine()).synchronize(repo, journal, key);
+      syncOffline = false;
+      lastSynced = journal.lastSuccess;
+      if (repository == repo) await rebuildIndex();
     } catch (e) {
-      if (repository == repo) syncError = describeError(e);
-      if (e is DropboxFailure && e.unauthorized) _dropboxSession = null;
+      syncOffline =
+          e is CloudOffline ||
+          e is http.ClientException ||
+          e is TimeoutException;
+      if (!syncOffline) syncError = describeError(e);
+      // Discard any uncommitted in-memory cursor after an interrupted merge.
+      final saved = await _state.read('book-${repo.id}');
+      if (saved != null) _journal = SyncJournal.decode(saved);
+      if (rethrowErrors) rethrow;
     } finally {
-      client.close();
       syncing = false;
       notifyListeners();
     }
   }
 
-  Future<List<CloudBook>> cloudBooks() async {
-    final client = http.Client();
-    try {
-      return await _cloud(client).listBooks();
-    } finally {
-      client.close();
-    }
+  Future<void> backupNow() async {
+    await syncNow(rethrowErrors: true);
+    await (await _engine()).backup(repository!, _journal!, _dataKey!);
+    notifyListeners();
   }
 
-  Future<VaultSnapshot> cloudSnapshot(String id) async {
-    final client = http.Client();
-    try {
-      final version = await _cloud(client).read(id);
-      if (version == null) {
-        throw const FormatException(
-          'Dit Dropbox-studieboek bestaat niet meer.',
-        );
-      }
-      await version.snapshot.validate(bible);
-      return version.snapshot;
-    } finally {
-      client.close();
-    }
+  Future<void> compactBackups() async {
+    await (await _engine()).compact(repository!, _journal!, _dataKey!);
+    notifyListeners();
   }
 
-  Future<void> restoreSnapshot(
-    VaultSnapshot snapshot, {
-    bool fromDropbox = false,
+  Future<void> changeSyncPassword(String password) async {
+    await (await _engine()).changePassword(
+      repository!.id,
+      _journal!,
+      _dataKey!,
+      password,
+    );
+    notifyListeners();
+  }
+
+  Future<void> setBackupPolicy(int hours, int operations, int retention) async {
+    _journal!
+      ..snapshotEveryHours = hours.clamp(1, 168)
+      ..snapshotEveryOperations = operations.clamp(1, 10000)
+      ..retainSnapshots = retention.clamp(2, 100);
+    await (await _engine()).persist(repository!.id, _journal!);
+    notifyListeners();
+  }
+
+  Future<List<RestorePoint>> restorePoints() async =>
+      (await _engine()).restorePoints(_journal!.dataset, _dataKey!);
+  Future<void> restorePoint(RestorePoint point) async {
+    await restoreSnapshot(await point.snapshot.separateCopy(bible));
+    notice = 'Hersteld als afzonderlijk studieboek. Het vorige studieboek en de wijzigingen op je andere apparaten blijven beschikbaar.';
+    notifyListeners();
+  }
+
+  Future<List<String>> cloudBooks() async => (await _engine()).datasets();
+  Future<void> openCloud(
+    String dataset,
+    String password, {
+    required bool mergeLocal,
   }) async {
+    final engine = await _engine();
+    final (journal, key, cloudSnapshot) = await engine.unlock(
+      dataset,
+      password,
+    );
+    try {
+      var snapshot = cloudSnapshot;
+      final local = repository == null ? null : await repository!.snapshot();
+      if (mergeLocal && local != null) {
+        snapshot = local.id == snapshot.id
+            ? snapshot.union(local)
+            : await local.copyInto(snapshot, bible);
+      }
+      final parent = await picker.pick();
+      if (parent == null) return;
+      final location = await picker.createChild(
+        parent,
+        'Studieboek-${const Uuid().v4().substring(0, 8)}',
+      );
+      await snapshot.restoreTo(picker.files(location), bible);
+      final repo = VaultRepository(picker.files(location), bible);
+      await repo.reload();
+      await attach(repo, resumeSync: false);
+      _dataKey?.dispose();
+      _dataKey = key.copy();
+      _journal = journal;
+      repo.actor = journal.actor;
+      await engine.rememberKey(dataset, key);
+      await engine.persist(repo.id, journal);
+      _startAutomaticSync();
+      await syncNow(rethrowErrors: true);
+    } finally {
+      key.dispose();
+    }
+  }
+
+  Future<void> restoreSnapshot(VaultSnapshot snapshot) async {
     await snapshot.validate(bible);
     final parent = await picker.pick();
     if (parent == null) return;
@@ -164,11 +336,9 @@ class AppController extends ChangeNotifier {
       'Studieboek-${const Uuid().v4().substring(0, 8)}',
     );
     await snapshot.restoreTo(picker.files(location), bible);
-    await open(location);
-    if (fromDropbox) {
-      _syncBooks.add(snapshot.id);
-      await syncNow();
-    }
+    final repo = VaultRepository(picker.files(location), bible);
+    await repo.reload();
+    await attach(repo, resumeSync: false);
   }
 
   Future<void> exportBackup() async {
@@ -207,7 +377,13 @@ class AppController extends ChangeNotifier {
     await attach(repo);
   }
 
-  Future<void> attach(VaultRepository repo) async {
+  Future<void> attach(VaultRepository repo, {bool resumeSync = true}) async {
+    _stopWatch();
+    _syncDelay?.cancel();
+    _syncPoll?.cancel();
+    _dataKey?.dispose();
+    _dataKey = null;
+    _journal = null;
     await index?.close();
     index = null;
     repository = repo;
@@ -218,8 +394,7 @@ class AppController extends ChangeNotifier {
     try {
       await recent.save(repo.files.location);
     } catch (_) {
-      notice =
-          'De map wordt niet onthouden. Je kunt dit studieboek de volgende keer opnieuw openen.';
+      notice = 'De map wordt niet onthouden. Je kunt dit studieboek de volgende keer opnieuw openen.';
     }
     try {
       index = await createSearchIndex(cacheDirectory, repo.id);
@@ -231,6 +406,14 @@ class AppController extends ChangeNotifier {
           'De zoekindex is niet beschikbaar. Eenvoudig zoeken blijft werken.';
     }
     notifyListeners();
+    if (resumeSync) {
+      try {
+        await _resumeSync();
+      } catch (_) {
+        syncError = 'De veilige sleutelopslag is niet beschikbaar. Koppel Dropbox opnieuw wanneer deze is ontgrendeld.';
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> chooseExisting() async => run(() async {
@@ -257,8 +440,7 @@ class AppController extends ChangeNotifier {
       ),
     );
     if (kIsWeb && !await requestPersistence()) {
-      notice =
-          'Je browser kan lokale gegevens opruimen. Maak regelmatig een reservekopie of synchroniseer met Dropbox.';
+      notice = 'Je browser kan lokale gegevens opruimen. Maak regelmatig een reservekopie of synchroniseer met Dropbox.';
       notifyListeners();
     }
   }
@@ -281,7 +463,7 @@ class AppController extends ChangeNotifier {
   Future<void> refresh() => run(() async {
     await repository?.reload();
     await rebuildIndex();
-    if (syncEnabled) await syncNow();
+    if (syncEnabled) await syncNow(rethrowErrors: true);
   });
   Future<void> rebuildIndex() async {
     try {
@@ -306,14 +488,26 @@ class AppController extends ChangeNotifier {
       kind,
       data,
       entityId: original?.id ?? id,
-      expected: parents ?? (original == null ? [] : [original.revision]),
-      expectedHashes: original?.fileFingerprint == null
-          ? null
-          : {original!.revision: original.fileFingerprint!},
+      expected:
+          parents ??
+          original?.causalHeads ??
+          (original == null ? [] : [original.revision]),
+      expectedHashes:
+          original?.causalHashes ??
+          (original?.fileFingerprint == null
+              ? null
+              : {original!.revision: original.fileFingerprint!}),
       deleted: deleted,
     );
     await rebuildIndex();
     if (syncEnabled) {
+      try {
+        await (await _engine()).stage(repository!, _journal!, _dataKey!);
+        await scheduleBackground(supportDirectory, repository!.id);
+      } catch (_) {
+        notice = 'Je wijziging is lokaal opgeslagen. Achtergrondsynchronisatie is nog niet beschikbaar; houd de app open om te synchroniseren.';
+        notifyListeners();
+      }
       _syncDelay?.cancel();
       _syncDelay = Timer(
         const Duration(seconds: 2),
@@ -342,6 +536,11 @@ class AppController extends ChangeNotifier {
       throw const FormatException('Wacht tot de synchronisatie is afgerond.');
     }
     _syncDelay?.cancel();
+    _syncPoll?.cancel();
+    _stopWatch();
+    _dataKey?.dispose();
+    _dataKey = null;
+    _journal = null;
     await recent.clear();
     await index?.close();
     index = null;
@@ -355,6 +554,9 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _syncDelay?.cancel();
     _syncPoll?.cancel();
+    _stopWatch();
+    _http.close();
+    _dataKey?.dispose();
     unawaited(index?.close());
     super.dispose();
   }

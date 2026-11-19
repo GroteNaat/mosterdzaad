@@ -1,4 +1,7 @@
 import 'dart:convert';
+
+import 'package:uuid/uuid.dart';
+
 import '../domain/bible.dart';
 import '../domain/entry.dart';
 import 'vault_repository.dart';
@@ -93,6 +96,78 @@ class VaultSnapshot implements VaultFiles {
       combined[e.key] = e.value;
     }
     return VaultSnapshot(combined);
+  }
+
+  /// Copy a complete local history into a different book without reusing IDs
+  /// or modifying the source. Its v1 representation is deterministically
+  /// converted to Loro on read. This is an explicit merge/restore operation.
+  Future<VaultSnapshot> copyInto(VaultSnapshot target, Bible bible) async {
+    final source = await validate(bible),
+        destination = await target.validate(bible);
+    if (source.scheme != destination.scheme && source.hasPassages) {
+      throw const FormatException(
+        'Deze studieboeken gebruiken verschillende versindelingen. Open ze afzonderlijk.',
+      );
+    }
+    final entities = {for (final e in source.history) e.id: const Uuid().v4()};
+    final revisions = {
+      for (final e in source.history) e.revision: const Uuid().v4(),
+    };
+    final files = Map<String, String>.from(target.contents);
+    for (final e in orderedRecords(source.history)) {
+      if (e.kind == 'preferences') continue;
+      final data = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(e.data)) as Map,
+      );
+      for (final field in ['themes', 'plans', 'studies']) {
+        if (data[field] is List) {
+          data[field] = (data[field] as List)
+              .map((id) => entities[id] ?? id)
+              .toList();
+        }
+      }
+      if (data['group'] is String) {
+        data['group'] = entities[data['group']] ?? data['group'];
+      }
+      final copy = Entry(
+        id: entities[e.id]!,
+        revision: revisions[e.revision]!,
+        parents: e.parents.map((p) => revisions[p]!).toList(),
+        kind: e.kind,
+        data: data,
+        updated: e.updated,
+        created: e.created,
+        deleted: e.deleted,
+      );
+      files['records/${copy.filename}'] = copy.encode();
+    }
+    final result = VaultSnapshot(files);
+    await result.validate(bible);
+    return result;
+  }
+
+  Future<VaultSnapshot> separateCopy(Bible bible) async {
+    final source = await validate(bible), id = const Uuid().v4();
+    final prefs = Entry(
+      id: id,
+      revision: const Uuid().v4(),
+      parents: [],
+      kind: 'preferences',
+      data: {'versification': source.scheme, 'deuterocanonical': source.extra},
+      updated: DateTime.now().toUtc(),
+    );
+    return copyInto(
+      VaultSnapshot({
+        'mosterdzaad.json': jsonEncode({
+          ...manifest,
+          'id': id,
+          'name': '$name — hersteld',
+          'created': DateTime.now().toUtc().toIso8601String(),
+        }),
+        'records/${prefs.filename}': prefs.encode(),
+      }),
+      bible,
+    );
   }
 
   Future<void> restoreTo(VaultFiles target, Bible bible) async {

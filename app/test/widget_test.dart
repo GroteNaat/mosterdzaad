@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -7,6 +8,7 @@ import 'package:mosterdzaad/main.dart';
 import 'package:mosterdzaad/app_controller.dart';
 import 'package:mosterdzaad/storage/vault_files.dart';
 import 'package:mosterdzaad/storage/vault_repository.dart';
+
 import 'helpers.dart';
 
 class TestPicker extends VaultPicker {
@@ -30,7 +32,7 @@ class TestController extends AppController {
         picker: picker,
       );
   @override
-  Future<void> attach(VaultRepository repo) async {
+  Future<void> attach(VaultRepository repo, {bool resumeSync = true}) async {
     repository = repo;
     error = null;
     notifyListeners();

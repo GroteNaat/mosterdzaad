@@ -24,7 +24,7 @@ jobs:
           - {os: ubuntu-latest, target: android}
           - {os: ubuntu-22.04, target: web}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: app
@@ -58,7 +58,7 @@ jobs:
           key: pub-${{ runner.os }}-${{ hashFiles('app/pubspec.lock') }}
       - name: Linux build dependencies
         if: matrix.target == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libjsoncpp-dev
       - uses: actions/setup-java@v4
         if: matrix.target == 'android'
         with:
@@ -74,8 +74,18 @@ jobs:
         if: matrix.target == 'linux'
         run: |
           dart format --output=none --set-exit-if-changed lib test
+          dart --disable-dart-dev tool/check_vendor.dart
           flutter --suppress-analytics analyze --no-pub
           flutter --suppress-analytics test --no-pub
+      - name: Native cryptographic interoperability
+        if: matrix.target == 'windows' || matrix.target == 'apple'
+        run: flutter --suppress-analytics test --no-pub test/sync_test.dart test/crdt_fixture_test.dart
+      - uses: actions/upload-artifact@v4
+        if: matrix.target == 'linux'
+        with:
+          name: native-sync-fixture
+          path: app/build/native-fixture.json
+          if-no-files-found: error
       - name: Build Linux
         if: matrix.target == 'linux'
         run: |
@@ -118,9 +128,10 @@ jobs:
           CHROME_EXECUTABLE: /usr/bin/google-chrome
         run: |
           flutter --suppress-analytics build web --release --no-web-resources-cdn
-          dart run tool/prepare_pwa.dart
+          dart --disable-dart-dev tool/prepare_pwa.dart
           npm install --prefix "$RUNNER_TEMP/pwa-test" --no-save --no-audit --no-fund playwright@1.62.1
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/pwa-test/node_modules/playwright" node tool/test_pwa.cjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/pwa-test/node_modules/playwright" node tool/test_sync_browser.cjs
           mkdir -p build/packages
           cd build/web
           zip -qr ../packages/Mosterdzaad-pwa.zip .
@@ -136,3 +147,34 @@ jobs:
           name: interface-previews-${{ matrix.target }}
           path: app/build/previews/*.png
           if-no-files-found: ignore
+  interoperability:
+    name: Native to browser interoperability
+    needs: native
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/mosterdzaad-flutter
+          key: flutter-3.50.0-Linux-X64
+      - name: Set up SDK
+        run: |
+          sdk_dir="$RUNNER_TEMP/mosterdzaad-flutter"
+          if [ ! -d "$sdk_dir/.git" ]; then git clone --depth 1 --branch 3.50.0 https://github.com/flutter/flutter.git "$sdk_dir"; fi
+          echo "$sdk_dir/bin" >> "$GITHUB_PATH"
+          echo "PUB_CACHE=$RUNNER_TEMP/mosterdzaad-pub" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-sync-fixture
+          path: app/build/interop
+      - run: flutter --suppress-analytics pub get --enforce-lockfile
+      - name: Test native updates in WebAssembly
+        env:
+          CHROME_EXECUTABLE: /usr/bin/google-chrome
+        run: |
+          npm install --prefix "$RUNNER_TEMP/pwa-test" --no-save --no-audit --no-fund playwright@1.62.1
+          NATIVE_FIXTURE="$PWD/build/interop/native-fixture.json" PLAYWRIGHT_MODULE="$RUNNER_TEMP/pwa-test/node_modules/playwright" node tool/test_sync_browser.cjs

@@ -1,5 +1,6 @@
 import 'package:idb_shim/idb_browser.dart';
 import 'package:uuid/uuid.dart';
+
 import 'browser_database.dart';
 import 'vault_types.dart';
 

@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import UniformTypeIdentifiers
+import workmanager_apple
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -9,6 +10,11 @@ import UniformTypeIdentifiers
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    WorkmanagerPlugin.registerLaunchHandlers()
+    WorkmanagerPlugin.setPluginRegistrantCallback { registry in
+      GeneratedPluginRegistrant.register(with: registry)
+    }
+    WorkmanagerPlugin.registerBGProcessingTask(withIdentifier: "nl.mosterdzaad.sync")
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 

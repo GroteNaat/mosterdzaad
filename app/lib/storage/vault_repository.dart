@@ -1,8 +1,12 @@
 import 'dart:convert';
+
 import 'package:crypto/crypto.dart';
 import 'package:uuid/uuid.dart';
+import 'package:loro_crdt/loro_crdt.dart';
+
 import '../domain/bible.dart';
 import '../domain/entry.dart';
+import '../domain/collaborative_entry.dart';
 import 'vault_files.dart';
 import 'vault_snapshot.dart';
 
@@ -14,14 +18,21 @@ class VaultConflict implements Exception {
 }
 
 class VaultRepository {
+  static const formatMarker =
+      '{"format":"mosterdzaad-requires-v2","version":2,"message":"Open dit studieboek met Mosterdzaad 0.3 of nieuwer."}\n';
+  static Future<void>? _runtime;
   VaultRepository(this.files, this.bible);
   final VaultFiles files;
   final Bible bible;
   String id = '', name = '';
   List<Entry> history = [];
   Map<String, List<Entry>> heads = {};
+  Map<String, List<Entry>> causalHeads = {};
+  List<List<Entry>> _conflicts = [];
+  String actor = const Uuid().v4();
   List<String> warnings = [];
   Map<String, String> _fingerprints = {};
+  Map<String, String> _recordContents = {};
   Future<void> _queue = Future.value();
   List<Entry> get entries =>
       heads.values
@@ -29,8 +40,7 @@ class VaultRepository {
           .map((v) => v.first)
           .toList()
         ..sort((a, b) => b.updated.compareTo(a.updated));
-  List<List<Entry>> get conflicts =>
-      heads.values.where((v) => v.length > 1).toList();
+  List<List<Entry>> get conflicts => _conflicts;
   String get scheme =>
       heads[id]?.firstOrNull?.text('versification') ?? 'english';
   bool get extra =>
@@ -83,6 +93,7 @@ class VaultRepository {
   }
 
   Future<void> reload() async {
+    await (_runtime ??= initLoro());
     final manifest = await files.read('mosterdzaad.json');
     if (manifest == null) {
       throw const FormatException(
@@ -107,14 +118,16 @@ class VaultRepository {
     final records = <Entry>[];
     final problems = <String>[];
     final prints = <String, String>{};
+    final sources = <String, String>{};
     final names = await files.list('records');
-    if (names.length > 100000) {
+    if (names.length > 300001) {
       throw const FormatException(
         'Dit studieboek bevat te veel revisiebestanden.',
       );
     }
     for (final filename in names.where(
-      (f) => f.endsWith('.md') || f.endsWith('.json'),
+      (f) =>
+          f != 'format-v2.json' && (f.endsWith('.md') || f.endsWith('.json')),
     )) {
       try {
         final contents = await files.read('records/$filename');
@@ -126,6 +139,7 @@ class VaultRepository {
           throw const FormatException('Ongeldige instellingen-ID.');
         }
         records.add(entry);
+        sources['records/${entry.filename}'] = contents;
         prints[entry.revision] = sha256
             .convert(utf8.encode(contents))
             .toString();
@@ -136,6 +150,41 @@ class VaultRepository {
           '$filename: onvolledig of ongeldig. Het bestand is behouden.',
         );
       }
+    }
+    // A commit marker publishes a complete record. Crashes during either
+    // write leave an unpublished attempt; retries use a fresh attempt ID.
+    // This works even on providers (Android SAF) without atomic file rename.
+    for (final marker in names.where((f) => f.endsWith('.commit'))) {
+      final text = await files.read('records/$marker');
+      Map commit;
+      try {
+        commit = jsonDecode(text ?? '') as Map;
+      } on FormatException {
+        continue;
+      } // Incomplete marker was never committed.
+      if (commit['version'] != 2 ||
+          commit['attempt'] != marker.replaceFirst('.commit', '') ||
+          !uuidPattern.hasMatch(commit['attempt'] as String? ?? '')) {
+        throw const FormatException('Ongeldig lokaal wijzigingenlogboek.');
+      }
+      final contents = await files.read('records/${commit['attempt']}.pending');
+      if (contents == null ||
+          sha256.convert(utf8.encode(contents)).toString() != commit['hash']) {
+        throw const FormatException(
+          'Een bevestigde lokale wijziging is beschadigd.',
+        );
+      }
+      final entry = Entry.decode(contents, commit['filename'] as String);
+      final path = 'records/${entry.filename}';
+      if (sources.containsKey(path)) {
+        if (sources[path] != contents) {
+          throw const FormatException('Botsende lokale revisies.');
+        }
+        continue;
+      }
+      records.add(entry);
+      sources[path] = contents;
+      prints[entry.revision] = entry.fileFingerprint!;
     }
     final candidateHeads = revisionHeads(records);
     final prefs = candidateHeads[j['id']];
@@ -168,13 +217,59 @@ class VaultRepository {
     if (candidateHeads.values.any((h) => h.isEmpty)) {
       throw const FormatException('Ongeldige revisiegeschiedenis.');
     }
-    orderedRecords(records);
+    final ordered = orderedRecords(records);
+    final projected = <String, List<Entry>>{};
+    final metadataConflicts = <List<Entry>>[];
+    for (final pair in candidateHeads.entries) {
+      final entityRecords = ordered.where((e) => e.id == pair.key).toList();
+      final collaboration = CollaborativeEntry(entityRecords);
+      final entry = collaboration.project(pair.value);
+      // Tombstones retain possibly incomplete historical data for recovery.
+      if (!entry.deleted) {
+        validateData(entry.kind, entry.data, bible, currentScheme);
+      }
+      projected[pair.key] = [entry];
+      if (pair.value.length > 1) {
+        metadataConflicts.addAll(collaboration.conflicts(pair.value, entry));
+      }
+    }
     id = j['id'] as String;
     name = j['name'] as String;
     history = records;
-    heads = candidateHeads;
+    causalHeads = candidateHeads;
+    heads = projected;
+    _conflicts = metadataConflicts;
     warnings = problems;
     _fingerprints = prints;
+    _recordContents = sources;
+  }
+
+  Future<void> _publish(Entry entry, String contents) async {
+    // v1 clients treat this as an unsupported record and refuse to write/sync.
+    // No existing manifest or user record needs an unsafe in-place migration.
+    if (await files.read('records/format-v2.json') == null) {
+      await files.writeNew('records/format-v2.json', formatMarker);
+    }
+    final attempt = const Uuid().v4();
+    final pending = 'records/$attempt.pending';
+    await files.writeNew(pending, contents);
+    if (await files.read(pending) != contents) {
+      throw const VaultConflict(
+        'De wijziging kon niet volledig worden opgeslagen. Je invoer blijft behouden.',
+      );
+    }
+    final marker = jsonEncode({
+      'version': 2,
+      'attempt': attempt,
+      'filename': entry.filename,
+      'hash': sha256.convert(utf8.encode(contents)).toString(),
+    });
+    await files.writeNew('records/$attempt.commit', marker);
+    if (await files.read('records/$attempt.commit') != marker) {
+      throw const VaultConflict(
+        'De lokale opslag heeft de wijziging niet bevestigd.',
+      );
+    }
   }
 
   Future<T> _exclusive<T>(Future<T> Function() action) {
@@ -195,7 +290,7 @@ class VaultRepository {
     };
     for (final e in history) {
       final path = 'records/${e.filename}';
-      final text = await files.read(path);
+      final text = _recordContents[path];
       if (text == null) {
         throw const VaultConflict(
           'Een bestand is tijdens het lezen verdwenen.',
@@ -210,38 +305,32 @@ class VaultRepository {
 
   Future<VaultSnapshot> snapshot() => _exclusive(_snapshot);
 
-  Future<VaultSnapshot> mergeSnapshot(
-    VaultSnapshot incoming,
-  ) => _exclusive(() async {
-    final remote = await incoming.validate(bible);
-    final local = await _snapshot();
-    final merged = local.union(incoming);
-    final candidate = await merged.validate(bible);
-    if ((hasPassages && candidate.scheme != scheme) ||
-        (remote.hasPassages && candidate.scheme != remote.scheme)) {
-      throw const VaultConflict(
-        'De kopieën gebruiken verschillende versindelingen. De gegevens zijn behouden; synchroniseer alleen studieboeken met dezelfde indeling.',
-      );
-    }
-    merged.encode(); // Check size before changing local files.
-    for (final e in orderedRecords(candidate.history)) {
-      final path = 'records/${e.filename}';
-      if (local.contents.containsKey(path)) continue;
-      final existing = await files.read(path);
-      if (existing != null && existing != merged.contents[path]) {
-        throw const VaultConflict(
-          'Het studieboek is tijdens synchronisatie gewijzigd. Probeer opnieuw.',
-        );
-      }
-      if (existing == null) await files.writeNew(path, merged.contents[path]!);
-      if (await files.read(path) != merged.contents[path]) {
-        throw const VaultConflict(
-          'Een ontvangen bestand kon niet volledig worden opgeslagen.',
-        );
-      }
-    }
-    return _snapshot();
-  });
+  Future<VaultSnapshot> mergeSnapshot(VaultSnapshot incoming) =>
+      _exclusive(() async {
+        final remote = await incoming.validate(bible);
+        final local = await _snapshot();
+        final merged = local.union(incoming);
+        final candidate = await merged.validate(bible);
+        if ((hasPassages && candidate.scheme != scheme) ||
+            (remote.hasPassages && candidate.scheme != remote.scheme)) {
+          throw const VaultConflict(
+            'De kopieën gebruiken verschillende versindelingen. De gegevens zijn behouden; synchroniseer alleen studieboeken met dezelfde indeling.',
+          );
+        }
+        merged.encode(); // Check size before changing local files.
+        for (final e in orderedRecords(candidate.history)) {
+          final path = 'records/${e.filename}';
+          if (local.contents.containsKey(path)) continue;
+          final existing = _recordContents[path];
+          if (existing != null && existing != merged.contents[path]) {
+            throw const VaultConflict(
+              'Het studieboek is tijdens synchronisatie gewijzigd. Probeer opnieuw.',
+            );
+          }
+          if (existing == null) await _publish(e, merged.contents[path]!);
+        }
+        return _snapshot();
+      });
 
   Future<Entry> save(
     String kind,
@@ -266,10 +355,14 @@ class VaultRepository {
           (kind == 'preferences' && (targetId != id || deleted))) {
         throw const FormatException('Ongeldige record-identiteit.');
       }
-      final current = heads[targetId] ?? [];
+      final current = causalHeads[targetId] ?? [];
       final actual = current.map((e) => e.revision).toSet();
-      if (actual.length != expected.length ||
-          !actual.containsAll(expected) ||
+      final known = history
+          .where((e) => e.id == targetId)
+          .map((e) => e.revision)
+          .toSet();
+      if (!known.containsAll(expected) ||
+          (actual.isNotEmpty && expected.isEmpty) ||
           expected.any((r) => beforePrints[r] != _fingerprints[r])) {
         throw const VaultConflict(
           'Dit onderdeel is elders gewijzigd. Je tekst is nog aanwezig. Kopieer je tekst en open de nieuwste versie voordat je opslaat.',
@@ -324,22 +417,24 @@ class VaultRepository {
           throw const FormatException('Kies een bestaande groep.');
         }
       }
+      final revision = const Uuid().v4();
+      final collaborative = CollaborativeEntry(
+        orderedRecords(history).where((e) => e.id == targetId).toList(),
+      );
       final record = Entry(
         id: targetId,
-        revision: const Uuid().v4(),
+        revision: revision,
         parents: expected,
         kind: kind,
         data: Map<String, dynamic>.from(jsonDecode(jsonEncode(data)) as Map),
         updated: DateTime.now().toUtc(),
         deleted: deleted,
+        crdt: base64Encode(collaborative.edit(revision, expected, data)),
+        actor: actor,
+        created: heads[targetId]?.first.created ?? DateTime.now().toUtc(),
       );
       final encoded = record.encode();
-      await files.writeNew('records/${record.filename}', encoded);
-      if (await files.read('records/${record.filename}') != encoded) {
-        throw const VaultConflict(
-          'Het bestand kon niet volledig worden teruggelezen. Je invoer is behouden; controleer de map.',
-        );
-      }
+      await _publish(record, encoded);
       await reload();
       return record;
     });

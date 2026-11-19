@@ -1,10 +1,12 @@
 import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mosterdzaad/domain/entry.dart';
 import 'package:mosterdzaad/storage/vault_repository.dart';
 import 'package:mosterdzaad/storage/vault_files.dart';
 import 'package:mosterdzaad/storage/search_index.dart';
 import 'package:uuid/uuid.dart';
+
 import 'helpers.dart';
 
 void main() {
@@ -36,7 +38,7 @@ void main() {
         expected: [first.revision],
       );
       expect(
-        files.contents['records/${first.filename}'],
+        (await repo.snapshot()).contents['records/${first.filename}'],
         contains('Origineel'),
       );
       final reopened = VaultRepository(files, bible);
@@ -68,32 +70,35 @@ void main() {
     );
     expect(files.contents, before);
   });
-  test('Stale edits fail without replacing another writer', () async {
-    final first = await repo.save('note', noteData(bible));
+  test('Stale edits merge without replacing another writer', () async {
+    final first = await repo.save(
+      'note',
+      noteData(bible, body: 'Eerste alinea.\nTweede alinea.'),
+    );
     final other = VaultRepository(files, bible);
     await other.reload();
     await other.save(
       'note',
-      noteData(bible, body: 'Ander apparaat'),
+      noteData(bible, body: 'Eerste gewijzigde alinea.\nTweede alinea.'),
       entityId: first.id,
       expected: [first.revision],
     );
-    await expectLater(
-      repo.save(
-        'note',
-        noteData(bible, body: 'Mijn concept'),
-        entityId: first.id,
-        expected: [first.revision],
-      ),
-      throwsA(isA<VaultConflict>()),
+    await repo.save(
+      'note',
+      noteData(bible, body: 'Eerste alinea.\nTweede gewijzigde alinea.'),
+      entityId: first.id,
+      expected: [first.revision],
     );
-    expect(repo.ofKind('note').single.text('body'), 'Ander apparaat');
+    expect(
+      repo.ofKind('note').single.text('body'),
+      'Eerste gewijzigde alinea.\nTweede gewijzigde alinea.',
+    );
   });
   test('Concurrent branches are kept and can be explicitly resolved', () async {
     final first = await repo.save('note', noteData(bible));
     final one = await repo.save(
       'note',
-      noteData(bible, body: 'Eerste apparaat'),
+      {...noteData(bible, body: 'Eerste apparaat'), 'title': 'Titel A'},
       entityId: first.id,
       expected: [first.revision],
     );
@@ -102,13 +107,16 @@ void main() {
       revision: const Uuid().v4(),
       parents: [first.revision],
       kind: 'note',
-      data: noteData(bible, body: 'Tweede apparaat'),
+      data: {
+        ...noteData(bible, body: 'Tweede apparaat'),
+        'title': 'Titel B',
+      },
       updated: DateTime.now(),
     );
     await files.writeNew('records/${other.filename}', other.encode());
     await repo.reload();
     expect(repo.conflicts.single.length, 2);
-    expect(repo.ofKind('note'), isEmpty);
+    expect(repo.ofKind('note'), hasLength(1));
     await repo.save(
       'note',
       one.data,
@@ -119,30 +127,21 @@ void main() {
     expect(repo.ofKind('note').single.text('body'), 'Eerste apparaat');
   });
   test(
-    'External Markdown edits cannot be lost after a background refresh',
+    'Tampered committed operations are rejected without replacing local data',
     () async {
       final first = await repo.save('note', noteData(bible));
-      final original = repo.ofKind('note').single;
-      final path = 'records/${first.filename}';
+      final path = files.contents.entries
+          .firstWhere(
+            (e) =>
+                e.key.endsWith('.pending') && e.value.contains(first.revision),
+          )
+          .key;
       files.contents[path] = files.contents[path]!.replaceFirst(
         'Een gedachte',
         'Bewerkt met een teksteditor',
       );
-      await repo.reload();
-      await expectLater(
-        repo.save(
-          'note',
-          noteData(bible, body: 'Concept dat nog open stond'),
-          entityId: first.id,
-          expected: [first.revision],
-          expectedHashes: {first.revision: original.fileFingerprint!},
-        ),
-        throwsA(isA<VaultConflict>()),
-      );
-      expect(
-        repo.ofKind('note').single.text('body'),
-        'Bewerkt met een teksteditor',
-      );
+      await expectLater(repo.reload(), throwsFormatException);
+      expect(repo.ofKind('note').single.text('body'), 'Een gedachte');
     },
   );
   test(

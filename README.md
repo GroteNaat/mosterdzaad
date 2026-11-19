@@ -17,26 +17,26 @@ Op iPhone/iPad is de eigen documentmap zichtbaar in Bestanden. Studieboeken binn
 - Leesplannen met 1–366 bewerkbare sessies en overdenkingen.
 - Bijbelstudies met datum en persoonlijke groepslabels.
 - Zoeken op tekst, verwijzingen en gekoppelde onderdelen.
-- Eerdere versies, prullenbak en expliciete afhandeling van gelijktijdige wijzigingen.
+- Eerdere versies, prullenbak, automatische tekstsamenvoeging en zichtbare metadata-alternatieven.
 - Nederlandse interface die zich aanpast aan telefoon en desktop.
 
 Er worden geen Bijbelteksten meegeleverd. De hoofdstuk- en versmetadata zijn dezelfde als in de oorspronkelijke app. Een vers telt mee als er een niet-lege notitie aan gekoppeld is. De versindeling staat vast zodra er passages in de geschiedenis voorkomen.
 
 ## Waar staan mijn gegevens?
 
-Alle inhoud en eerdere versies staan in de gekozen studieboekmap. Notities zijn leesbare Markdownbestanden met metadata; andere onderdelen zijn JSON-records. Een SQLite/Drift-zoekindex in de lokale appcache is afgeleid van deze bestanden. Verwijderen van de cache verwijdert geen notities.
+Alle inhoud en eerdere versies staan in de gekozen studieboekmap. De gegevens zijn leesbare Markdown/JSON-records in een duurzaam lokaal wijzigingenlogboek. Een SQLite/Drift-zoekindex in de lokale appcache is afgeleid van deze bestanden. Verwijderen van de cache verwijdert geen notities.
 
 Maak regelmatig een kopie van **de volledige studieboekmap**. In de PWA staan de records in IndexedDB en kun je een reservekopie downloaden en herstellen. Browseropslag blijft afhankelijk van je browser en kan worden gewist.
 
-Bij **Instellingen → Dit studieboek koppelen** activeer je Dropbox-synchronisatie. Open op een tweede apparaat met **Uit Dropbox openen**. De volledige geschiedenis wordt samengevoegd; concurrente versies blijven behouden. Aanmelden geldt voor de appsessie, synchronisatie werkt terwijl de app open is. Zie [Dropbox instellen en gebruiken](app/docs/DROPBOX.md). Gebruik de ingebouwde sync bij voorkeur met een gewone lokale map, niet tegelijk met een tweede synchronisatieprogramma op dezelfde map.
+Bij **Instellingen → Dropbox-synchronisatie en back-up** koppel je je eigen Dropbox en stel je een versleutelingswachtwoord in. Wijzigingen worden vóór upload versleuteld en afzonderlijk verstuurd. Op een tweede apparaat gebruik je **Uit Dropbox openen** en hetzelfde wachtwoord. Tekstwijzigingen worden met Loro samengevoegd; metadata-alternatieven blijven beschikbaar. Er zijn afzonderlijke versleutelde herstelpunten. Zie [Dropbox instellen](app/docs/DROPBOX.md) en [protocol en vrijgavevoorwaarden](app/docs/ENCRYPTED-SYNC.md).
 
-De bestanden zijn niet versleuteld. Er zijn geen analytics of externe fonts. Alleen bij de vrijwillige Dropbox-koppeling communiceert de app met Dropbox; notities gaan niet naar een Mosterdzaad-server. Zie [opslagformaat en herstel](app/docs/STORAGE.md).
+De lokale bestanden blijven onversleuteld. Er zijn geen analytics of externe fonts. Alleen de vrijwillige Dropbox-koppeling verstuurt gegevens, als ciphertext, naar Dropbox; er is geen Mosterdzaad-server. PWA-sleutelopslag gebruikt WebCrypto, native apps gebruiken platformbeveiligde opslag. Zie [opslag en herstel](app/docs/STORAGE.md).
 
 Er is bewust geen import van JSON-exports of databases uit de oude Django-app. **Bestaand studieboek openen** betekent een studieboek van deze Flutter-app.
 
 ## Bouwen en testen
 
-Flutter **3.50.0** (Dart 3.14). Gebruik de bijbehorende native ontwikkeltools voor je platform.
+Flutter **3.50.0** (Dart 3.14). Gebruik de bijbehorende native ontwikkeltools plus rustup; Loro pint Rust 1.90.0. Linux heeft ook libsecret-1-dev en libjsoncpp-dev nodig. De browserassets zijn gepind en lokaal meegeleverd.
 
 ```sh
 cd app

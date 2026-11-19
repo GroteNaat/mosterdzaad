@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
+
 import '../app_controller.dart';
 import 'common.dart';
 import 'sync_panel.dart';
@@ -37,16 +38,14 @@ class WelcomeScreen extends StatelessWidget {
                 const SizedBox(height: 56),
                 Text(
                   'Ruimte om te groeien.',
-                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: Theme.of(context).textTheme.displaySmall
+                      ?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 16),
                 Text(
                   'Een open Bijbel. Een aandachtig hart.\nBewaar je gedachten in je eigen studieboek.',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(height: 1.6),
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(height: 1.6),
                 ),
                 const SizedBox(height: 32),
                 if (app.error != null) Notice(app.error!, error: true),

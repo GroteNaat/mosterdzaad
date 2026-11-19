@@ -1,6 +1,8 @@
 import 'dart:io';
+
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+
 import '../storage/search_index_native.dart';
 
 Future<String> supportPath() async =>

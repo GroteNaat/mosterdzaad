@@ -1,10 +1,12 @@
 import 'package:material_ui/material_ui.dart';
+
 import '../app_controller.dart';
 import '../domain/bible.dart';
 import '../domain/entry.dart';
 import 'common.dart';
 import 'editor.dart';
 import 'sync_panel.dart';
+
 import 'package:flutter/foundation.dart';
 
 class NotebookShell extends StatefulWidget {
@@ -1165,9 +1167,9 @@ class SettingsPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Twee versies van hetzelfde onderdeel',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                Text(
+                  'Gelijktijdige wijzigingen: ${conflict.first.conflictField ?? 'gegevens'}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const Text(
                   'Bekijk beide versies en kies welke je wilt gebruiken. Alle eerdere bestanden blijven bewaard.',
@@ -1189,7 +1191,9 @@ class SettingsPage extends StatelessWidget {
                           version.kind,
                           copyData(version),
                           id: version.id,
-                          parents: conflict.map((e) => e.revision).toList(),
+                          parents:
+                              version.causalHeads ??
+                              conflict.map((e) => e.revision).toList(),
                           deleted: version.deleted,
                         );
                       }),

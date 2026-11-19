@@ -1,5 +1,7 @@
 import 'dart:convert';
+
 import 'package:crypto/crypto.dart';
+
 import 'bible.dart';
 
 const entryKinds = ['note', 'plan', 'study', 'theme', 'group', 'preferences'];
@@ -17,6 +19,12 @@ class Entry {
     required this.updated,
     this.deleted = false,
     this.fileFingerprint,
+    this.crdt,
+    this.actor,
+    this.created,
+    this.causalHeads,
+    this.causalHashes,
+    this.conflictField,
   });
   final String id, revision, kind;
   final List<String> parents;
@@ -24,6 +32,11 @@ class Entry {
   final DateTime updated;
   final bool deleted;
   final String? fileFingerprint;
+  final String? crdt, actor;
+  final DateTime? created;
+  final List<String>? causalHeads;
+  final Map<String, String>? causalHashes;
+  final String? conflictField;
   String text(String key) => data[key] as String? ?? '';
   List<String> links(String key) => List<String>.from(data[key] as List? ?? []);
   List<Passage> get passages => (data['passages'] as List? ?? [])
@@ -39,7 +52,10 @@ class Entry {
       .toList();
   Map<String, dynamic> toJson() => {
     'format': 'mosterdzaad-record',
-    'version': 1,
+    'version': crdt == null ? 1 : 2,
+    if (crdt != null) 'crdt': crdt,
+    if (actor != null) 'actor': actor,
+    if (created != null) 'created': created!.toUtc().toIso8601String(),
     'id': id,
     'revision': revision,
     'parents': parents,
@@ -76,7 +92,7 @@ class Entry {
     } else {
       j = Map<String, dynamic>.from(jsonDecode(contents) as Map);
     }
-    if (j['format'] != 'mosterdzaad-record' || j['version'] != 1) {
+    if (j['format'] != 'mosterdzaad-record' || ![1, 2].contains(j['version'])) {
       throw const FormatException('Onbekend bestandsformaat.');
     }
     final entry = Entry(
@@ -88,6 +104,11 @@ class Entry {
       updated: DateTime.parse(j['updated'] as String),
       deleted: j['deleted'] as bool,
       fileFingerprint: sha256.convert(utf8.encode(contents)).toString(),
+      crdt: j['crdt'] as String?,
+      actor: j['actor'] as String?,
+      created: j['created'] == null
+          ? null
+          : DateTime.parse(j['created'] as String),
     );
     if (!uuidPattern.hasMatch(entry.id) ||
         !uuidPattern.hasMatch(entry.revision) ||
@@ -95,7 +116,11 @@ class Entry {
           (p) => !uuidPattern.hasMatch(p) || p == entry.revision,
         ) ||
         !entryKinds.contains(entry.kind) ||
-        filename != entry.filename) {
+        filename != entry.filename ||
+        (j['version'] == 2 &&
+            (entry.crdt == null ||
+                entry.actor == null ||
+                entry.created == null))) {
       throw const FormatException('Ongeldige record-identiteit.');
     }
     return entry;

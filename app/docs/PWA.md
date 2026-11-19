@@ -13,14 +13,14 @@ Met Flutter 3.50.0, vanuit `app/`:
 ```sh
 flutter pub get --enforce-lockfile
 flutter build web --release --no-web-resources-cdn
-dart run tool/prepare_pwa.dart
+dart --disable-dart-dev tool/prepare_pwa.dart
 ```
 
 Voor een subpad, bijvoorbeeld `/mosterdzaad/`:
 
 ```sh
 flutter build web --release --no-web-resources-cdn --base-href /mosterdzaad/
-dart run tool/prepare_pwa.dart
+dart --disable-dart-dev tool/prepare_pwa.dart
 ```
 
 Gebruik de **volledige inhoud** van `build/web/` op een statische HTTPS-host.
@@ -84,3 +84,9 @@ statische server: maken, bewaren, herladen, offline herladen, export/herstel,
 Dropbox aanmelden, tweede apparaat en een appupdate met open concept. Doe de
 laatste controle ook op een echte iPhone/iPad; een Chromium-test bewijst geen
 Safari- of beginschermcompatibiliteit.
+
+## Versleutelde synchronisatie
+
+De offline build bevat ook Loro-WASM, libsodium-sumo, de Argon2-Web Worker en de browserkluis. Laat bij een CSP lokale workers en WebAssembly toe; Dropbox gebruikt ook notify.dropboxapi.com voor longpoll. De gegevenssleutel en refresh token worden verpakt met een niet-exporteerbare WebCrypto-key in IndexedDB. Dit is geen OS-keychain en biedt geen bescherming tegen XSS of een kwaadaardige appupdate. Gebruik een eigen HTTPS-origin en geen scripts van derden.
+
+`node tool/test_sync_browser.cjs` voert de gedeelde cryptografie-/synchronisatieproeven en een browserkluis-herstarttest uit. Zie [protocol en beperkingen](ENCRYPTED-SYNC.md).

@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:ui' show AppExitResponse;
+
 import 'package:material_ui/material_ui.dart';
+
 import '../app_controller.dart';
 import '../domain/entry.dart';
 import 'common.dart';
@@ -489,9 +491,7 @@ class _EntryEditorState extends State<EntryEditor> {
                   ],
                   const SizedBox(height: 28),
                   Text(
-                    dirty
-                        ? 'Er zijn nog niet opgeslagen wijzigingen.'
-                        : 'Je wijzigingen worden bij Opslaan in je lokale studieboek bewaard.',
+                    dirty ? 'Er zijn nog niet opgeslagen wijzigingen.' : 'Je wijzigingen worden bij Opslaan in je lokale studieboek bewaard.',
                     style: const TextStyle(color: Colors.black54),
                   ),
                   const SizedBox(height: 12),
