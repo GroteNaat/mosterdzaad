@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:sodium/sodium_sumo.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
 
@@ -21,6 +22,7 @@ import 'sync/encrypted_cloud.dart';
 import 'sync/encrypted_sync.dart';
 import 'sync/local_state.dart';
 import 'sync/background_sync.dart';
+import 'sync/sync_trigger.dart';
 
 String describeError(Object error) => error is FormatException
     ? error.message
@@ -52,9 +54,11 @@ class AppController extends ChangeNotifier {
   final _http = http.Client();
   SyncJournal? _journal;
   SecureKey? _dataKey;
-  Timer? _syncDelay, _syncPoll;
-  http.Client? _watchClient;
-  int _watchGeneration = 0;
+  StreamSubscription<List<ConnectivityResult>>? _connectivity;
+  late final _syncTrigger = SyncTrigger(
+    canRun: () => syncEnabled && dropboxConnected && !busy && !syncing,
+    synchronize: syncNow,
+  );
   bool syncing = false, syncOffline = false;
   String? syncError;
   DateTime? lastSynced;
@@ -107,11 +111,12 @@ class AppController extends ChangeNotifier {
     }
     syncError = null;
     _startAutomaticSync();
+    requestSync();
     notifyListeners();
   }
 
   Future<void> _resumeSync() async {
-    _stopWatch();
+    _stopAutomaticSync();
     _dataKey?.dispose();
     _dataKey = null;
     _journal = null;
@@ -131,7 +136,7 @@ class AppController extends ChangeNotifier {
     lastSynced = _journal!.lastSuccess;
     if (dropboxConnected) {
       _startAutomaticSync();
-      unawaited(syncNow());
+      requestSync();
     }
   }
 
@@ -149,9 +154,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> disconnectDropbox() async {
     if (syncing) return;
-    _syncDelay?.cancel();
-    _syncPoll?.cancel();
-    _stopWatch();
+    _stopAutomaticSync();
     await _secrets.delete('dropbox-refresh');
     await cancelBackground();
     if (_journal != null) await _secrets.delete('dek/${_journal!.dataset}');
@@ -165,64 +168,41 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _stopWatch() {
-    _watchGeneration++;
-    _watchClient?.close();
-    _watchClient = null;
+  void _stopAutomaticSync() {
+    _syncTrigger.cancel();
+    unawaited(_connectivity?.cancel());
+    _connectivity = null;
   }
 
   void _startAutomaticSync() {
-    _syncPoll?.cancel();
-    // Retry after connectivity returns, including browsers without online events.
-    _syncPoll = Timer.periodic(const Duration(seconds: 20), (_) {
-      if (syncEnabled) unawaited(syncNow());
-    });
-    _stopWatch();
-    if (syncEnabled && dropboxConnected) unawaited(_watch(_watchGeneration));
+    if (!syncEnabled || !dropboxConnected || _connectivity != null) return;
+    // OS/browser events only: this does not probe Dropbox in the background.
+    _connectivity = Connectivity().onConnectivityChanged.listen(
+      (connections) {
+        if (connections.any((c) => c != ConnectivityResult.none) &&
+            (syncOffline || pendingChanges > 0)) {
+          requestSync();
+        }
+      },
+      // Some systems cannot observe connectivity. Focus/save/manual still work.
+      onError: (Object _) {},
+    );
   }
 
-  Future<void> _watch(int generation) async {
-    final client = http.Client();
-    _watchClient = client;
-    try {
-      final cloud = DropboxObjects(client, _token);
-      while (generation == _watchGeneration &&
-          syncEnabled &&
-          dropboxConnected) {
-        final cursor = _journal!.cursor;
-        if (cursor.isEmpty) {
-          await Future<void>.delayed(const Duration(seconds: 3));
-          continue;
-        }
-        try {
-          final result = await cloud.poll(cursor);
-          if (generation != _watchGeneration) break;
-          if (result.changed) await syncNow();
-          if (result.backoff > 0) {
-            await Future<void>.delayed(Duration(seconds: result.backoff));
-          }
-        } on CursorReset {
-          if (generation != _watchGeneration) break;
-          _journal!.cursor = '';
-          await syncNow();
-        } catch (_) {
-          await Future<void>.delayed(const Duration(seconds: 20));
-        }
-      }
-    } finally {
-      client.close();
-    }
+  /// Startup, foreground/window focus, and reconnection share one queue.
+  void requestSync({Duration delay = const Duration(milliseconds: 400)}) {
+    if (syncEnabled && dropboxConnected) _syncTrigger.request(delay: delay);
   }
 
   Future<void> syncNow({bool rethrowErrors = false}) async {
     final repo = repository, journal = _journal, key = _dataKey;
-    if (syncing ||
-        (!rethrowErrors && busy) ||
-        repo == null ||
-        journal == null ||
-        key == null) {
+    if (repo == null || journal == null || key == null) return;
+    if (syncing || (!rethrowErrors && busy)) {
+      requestSync();
       return;
     }
+    // This run also satisfies any earlier focus/startup/save request.
+    _syncTrigger.cancel();
     syncing = true;
     syncError = null;
     notifyListeners();
@@ -238,12 +218,17 @@ class AppController extends ChangeNotifier {
           e is TimeoutException;
       if (!syncOffline) syncError = describeError(e);
       // Discard any uncommitted in-memory cursor after an interrupted merge.
-      final saved = await _state.read('book-${repo.id}');
-      if (saved != null) _journal = SyncJournal.decode(saved);
+      try {
+        final saved = await _state.read('book-${repo.id}');
+        if (saved != null) _journal = SyncJournal.decode(saved);
+      } catch (_) {
+        syncError = 'De synchronisatiestatus kon niet worden gelezen. Je wijzigingen zijn lokaal bewaard.';
+      }
       if (rethrowErrors) rethrow;
     } finally {
       syncing = false;
       notifyListeners();
+      _syncTrigger.wake();
     }
   }
 
@@ -368,6 +353,7 @@ class AppController extends ChangeNotifier {
     } finally {
       busy = false;
       notifyListeners();
+      _syncTrigger.wake();
     }
   }
 
@@ -378,9 +364,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> attach(VaultRepository repo, {bool resumeSync = true}) async {
-    _stopWatch();
-    _syncDelay?.cancel();
-    _syncPoll?.cancel();
+    _stopAutomaticSync();
     _dataKey?.dispose();
     _dataKey = null;
     _journal = null;
@@ -457,6 +441,7 @@ class AppController extends ChangeNotifier {
     } finally {
       busy = false;
       notifyListeners();
+      _syncTrigger.wake();
     }
   }
 
@@ -508,11 +493,7 @@ class AppController extends ChangeNotifier {
         notice = 'Je wijziging is lokaal opgeslagen. Achtergrondsynchronisatie is nog niet beschikbaar; houd de app open om te synchroniseren.';
         notifyListeners();
       }
-      _syncDelay?.cancel();
-      _syncDelay = Timer(
-        const Duration(seconds: 2),
-        () => unawaited(syncNow()),
-      );
+      requestSync(delay: const Duration(seconds: 2));
     }
     return result;
   }
@@ -535,9 +516,7 @@ class AppController extends ChangeNotifier {
     if (syncing) {
       throw const FormatException('Wacht tot de synchronisatie is afgerond.');
     }
-    _syncDelay?.cancel();
-    _syncPoll?.cancel();
-    _stopWatch();
+    _stopAutomaticSync();
     _dataKey?.dispose();
     _dataKey = null;
     _journal = null;
@@ -552,9 +531,8 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _syncDelay?.cancel();
-    _syncPoll?.cancel();
-    _stopWatch();
+    _stopAutomaticSync();
+    _syncTrigger.dispose();
     _http.close();
     _dataKey?.dispose();
     unawaited(index?.close());

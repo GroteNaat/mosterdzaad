@@ -118,9 +118,6 @@ class ProbeCloud implements EncryptedCloud {
   }
 
   @override
-  Future<CloudPoll> poll(String cursor) async =>
-      CloudPoll(cursor != 'cursor-$sequence', 0);
-  @override
   Future<void> delete(String path, String revision) async {
     if (objects[path]?.revision != revision) throw CloudChanged();
     objects.remove(path);

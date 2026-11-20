@@ -87,6 +87,6 @@ Safari- of beginschermcompatibiliteit.
 
 ## Versleutelde synchronisatie
 
-De offline build bevat ook Loro-WASM, libsodium-sumo, de Argon2-Web Worker en de browserkluis. Laat bij een CSP lokale workers en WebAssembly toe; Dropbox gebruikt ook notify.dropboxapi.com voor longpoll. De gegevenssleutel en refresh token worden verpakt met een niet-exporteerbare WebCrypto-key in IndexedDB. Dit is geen OS-keychain en biedt geen bescherming tegen XSS of een kwaadaardige appupdate. Gebruik een eigen HTTPS-origin en geen scripts van derden.
+De offline build bevat ook Loro-WASM, libsodium-sumo, de Argon2-Web Worker en de browserkluis. Laat bij een CSP lokale workers en WebAssembly toe, plus verbindingen met api.dropboxapi.com en content.dropboxapi.com. Synchronisatie volgt openen, hervatten/vensterfocus, opslaan en verbindingsherstel bij achtergebleven werk; er is geen periodieke controle of longpoll. De gegevenssleutel en refresh token worden verpakt met een niet-exporteerbare WebCrypto-key in IndexedDB. Dit is geen OS-keychain en biedt geen bescherming tegen XSS of een kwaadaardige appupdate. Gebruik een eigen HTTPS-origin en geen scripts van derden.
 
 `node tool/test_sync_browser.cjs` voert de gedeelde cryptografie-/synchronisatieproeven en een browserkluis-herstarttest uit. Zie [protocol en beperkingen](ENCRYPTED-SYNC.md).

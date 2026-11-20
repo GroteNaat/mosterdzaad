@@ -21,6 +21,7 @@ class VaultRepository {
   static const formatMarker =
       '{"format":"mosterdzaad-requires-v2","version":2,"message":"Open dit studieboek met Mosterdzaad 0.3 of nieuwer."}\n';
   static Future<void>? _runtime;
+  static bool _runtimeReady = false;
   VaultRepository(this.files, this.bible);
   final VaultFiles files;
   final Bible bible;
@@ -93,7 +94,16 @@ class VaultRepository {
   }
 
   Future<void> reload() async {
-    await (_runtime ??= initLoro());
+    // Do not retain a completed Future from a different widget-test zone.
+    // Concurrent first opens still share the same initialization.
+    if (!_runtimeReady) {
+      try {
+        await (_runtime ??= initLoro());
+        _runtimeReady = true;
+      } finally {
+        _runtime = null;
+      }
+    }
     final manifest = await files.read('mosterdzaad.json');
     if (manifest == null) {
       throw const FormatException(

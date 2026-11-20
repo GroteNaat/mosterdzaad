@@ -55,17 +55,10 @@ class CloudPage {
   final bool more;
 }
 
-class CloudPoll {
-  CloudPoll(this.changed, this.backoff);
-  final bool changed;
-  final int backoff;
-}
-
 abstract interface class EncryptedCloud {
   Future<CloudObject?> download(String path);
   Future<String> upload(String path, Uint8List bytes, {String? revision});
   Future<CloudPage> list(String path, {String? cursor});
-  Future<CloudPoll> poll(String cursor);
   Future<void> delete(String path, String revision);
 }
 
@@ -97,13 +90,12 @@ class DropboxObjects implements EncryptedCloud {
     Object? json,
     Uint8List? bytes,
     Map<String, String> extra = const {},
-    bool auth = true,
   }) async {
     for (var attempt = 0; ; attempt++) {
       try {
         final request = http.Request('POST', Uri.https(host, '/2/$endpoint'));
         request.headers.addAll({
-          if (auth) 'Authorization': 'Bearer ${await token(attempt == 1)}',
+          'Authorization': 'Bearer ${await token(attempt == 1)}',
           'Content-Type': bytes == null
               ? 'application/json'
               : 'application/octet-stream',
@@ -263,23 +255,6 @@ class DropboxObjects implements EncryptedCloud {
       ],
       json['cursor'] as String,
       json['has_more'] as bool,
-    );
-  }
-
-  @override
-  Future<CloudPoll> poll(String cursor) async {
-    final r = await _request(
-      'notify.dropboxapi.com',
-      'files/list_folder/longpoll',
-      auth: false,
-      json: {'cursor': cursor, 'timeout': 30},
-    );
-    if (_tag(r, 'reset')) throw CursorReset();
-    _success(r);
-    final json = jsonDecode(r.body) as Map;
-    return CloudPoll(
-      json['changes'] as bool,
-      (json['backoff'] as num?)?.toInt() ?? 0,
     );
   }
 

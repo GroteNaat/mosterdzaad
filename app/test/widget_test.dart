@@ -31,6 +31,12 @@ class TestController extends AppController {
         cacheDirectory: Directory.systemTemp.path,
         picker: picker,
       );
+  int focusRequests = 0;
+  @override
+  void requestSync({Duration delay = const Duration(milliseconds: 400)}) {
+    focusRequests++;
+  }
+
   @override
   Future<void> attach(VaultRepository repo, {bool resumeSync = true}) async {
     repository = repo;
@@ -141,6 +147,44 @@ void main() {
       expect(app.ofKind('note'), isEmpty);
     },
   );
+  testWidgets('Resuming or focusing the app requests sync even while busy', (
+    tester,
+  ) async {
+    final picker = TestPicker();
+    final app = TestController(picker);
+    await app.attach(
+      await VaultRepository.create(
+        picker.memory,
+        app.bible,
+        'Focus test',
+        'english',
+        false,
+      ),
+    );
+    await tester.pumpWidget(MosterdzaadApp(app));
+    await tester.pumpAndSettle();
+    app.focusRequests = 0;
+    app.busy = true;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    expect(app.focusRequests, 1);
+    tester.binding.handleViewFocusChanged(
+      ui.ViewFocusEvent(
+        viewId: tester.view.viewId,
+        state: ui.ViewFocusState.unfocused,
+        direction: ui.ViewFocusDirection.undefined,
+      ),
+    );
+    expect(app.focusRequests, 1);
+    tester.binding.handleViewFocusChanged(
+      ui.ViewFocusEvent(
+        viewId: tester.view.viewId,
+        state: ui.ViewFocusState.focused,
+        direction: ui.ViewFocusDirection.undefined,
+      ),
+    );
+    expect(app.focusRequests, 2);
+  });
   for (final width in [390.0, 1280.0]) {
     testWidgets('Navigate, search and create a plan at width $width', (
       tester,

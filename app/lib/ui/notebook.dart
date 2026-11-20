@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'dart:ui' show ViewFocusEvent, ViewFocusState;
+
 import '../app_controller.dart';
 import '../domain/bible.dart';
 import '../domain/entry.dart';
@@ -51,10 +53,14 @@ class _NotebookShellState extends State<NotebookShell>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
-        widget.app.repository != null &&
-        !widget.app.busy) {
-      widget.app.refresh();
+    if (state == AppLifecycleState.resumed) widget.app.requestSync();
+  }
+
+  @override
+  void didChangeViewFocus(ViewFocusEvent event) {
+    if (event.state == ViewFocusState.focused &&
+        event.viewId == View.of(context).viewId) {
+      widget.app.requestSync();
     }
   }
 

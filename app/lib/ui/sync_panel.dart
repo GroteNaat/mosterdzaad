@@ -38,7 +38,7 @@ class SyncPanel extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             const Text(
-              'Je werkt altijd lokaal. Wijzigingen en herstelpunten worden op je apparaat versleuteld voordat ze naar je eigen Dropbox gaan.',
+              'Je werkt altijd lokaal. We synchroniseren bij openen, terugkeren naar de app en kort na opslaan. Wijzigingen en herstelpunten worden eerst op je apparaat versleuteld.',
             ),
             const SizedBox(height: 12),
             Row(
