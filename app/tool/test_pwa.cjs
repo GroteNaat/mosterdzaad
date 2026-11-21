@@ -32,6 +32,11 @@ async function main() {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(String(error)));
+  const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const fill = async (name, value) => {
+    const field = page.getByRole('textbox', {name});
+    await field.click(); await frames(); await field.fill(value); await frames();
+  };
   const enableSemantics = async () => {
     await page.locator('flt-semantics-placeholder').waitFor();
     await page.locator('flt-semantics-placeholder').dispatchEvent('click');
@@ -40,12 +45,12 @@ async function main() {
     await page.goto(origin);
     await enableSemantics();
     await page.getByRole('button', {name: 'Nieuw studieboek maken', exact: true}).click();
-    await page.getByRole('textbox', {name: 'Naam van je studieboek'}).fill('Browserproef');
+    await fill('Naam van je studieboek', 'Browserproef');
     await page.getByRole('button', {name: 'Studieboek maken', exact: true}).click();
     await page.getByRole('button', {name: 'Nieuwe notitie', exact: true}).first().click();
-    await page.getByRole('textbox', {name: 'Titel (optioneel)'}).fill('Een bewaarde gedachte');
-    await page.getByRole('textbox', {name: 'Wat wil je bewaren?'}).fill('Deze notitie blijft offline bestaan.');
-    await page.getByRole('textbox', {name: 'Bijbelverwijzingen'}).fill('Johannes 3:16');
+    await fill('Titel (optioneel)', 'Een bewaarde gedachte');
+    await fill('Wat wil je bewaren?', 'Deze notitie blijft offline bestaan.');
+    await fill('Bijbelverwijzingen', 'Johannes 3:16');
     await page.getByRole('button', {name: 'Opslaan', exact: true}).click();
     await page.getByRole('heading', {name: 'Nieuwe notitie', exact: true}).waitFor({state: 'hidden'});
     await page.getByRole('button', {name: 'Instellingen', exact: true}).click();
@@ -88,7 +93,7 @@ async function main() {
     await page.getByRole('button', {name: 'Overzicht', exact: true}).click();
     // A new service worker must wait rather than discard an unsaved note.
     await page.getByRole('button', {name: 'Nieuwe notitie', exact: true}).first().click();
-    await page.getByRole('textbox', {name: 'Wat wil je bewaren?'}).fill('Nog niet opgeslagen concept');
+    await fill('Wat wil je bewaren?', 'Nog niet opgeslagen concept');
     nextRelease = true;
     await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
     await page.waitForFunction(async () => !!(await navigator.serviceWorker.getRegistration()).waiting);

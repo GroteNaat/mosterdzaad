@@ -124,6 +124,27 @@ async function main() {
     await button('Kies een Bijbelboek').waitFor();
     await frames();
     await shot('design-overview-phone');
+    for (let i = 0; i < 4 && !await button('Nieuwe notitie').count(); i++) {
+      await page.mouse.move(300, 650);
+      await page.mouse.wheel(0, 600);
+      await frames();
+    }
+    await button('Nieuwe notitie').click();
+    await fill('Wat wil je bewaren?', 'Nog niet opgeslagen op de telefoon');
+    await button('Navigatiemenu openen').click();
+    await button('Instellingen').click();
+    await button('Annuleren').click();
+    await field('Wat wil je bewaren?').click();
+    await frames();
+    assert.equal(await field('Wat wil je bewaren?').inputValue(), 'Nog niet opgeslagen op de telefoon');
+    await button('Navigatiemenu openen').click();
+    await button('Instellingen').click();
+    await button('Wijzigingen laten vervallen').click();
+    await button('Reservekopie downloaden').waitFor();
+    await shot('design-settings-phone');
+    await button('Navigatiemenu openen').click();
+    await button('Overzicht').click();
+    await button('Kies een Bijbelboek').waitFor();
     await page.setViewportSize({width:844,height:390});
     await button('Instellingen').waitFor();
     await shot('design-landscape');

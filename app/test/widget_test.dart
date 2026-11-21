@@ -84,7 +84,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(app.repository?.name, 'Mijn studieboek');
       await tester.scrollUntilVisible(
-        find.text('Nieuwe notitie').first,
+        find.text('Nieuwe notitie'),
         300,
         scrollable: find
             .descendant(
@@ -142,7 +142,7 @@ void main() {
       await tester.pumpWidget(MosterdzaadApp(app));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.text('Nieuwe notitie').first,
+        find.text('Nieuwe notitie'),
         300,
         scrollable: find
             .descendant(
