@@ -156,9 +156,11 @@ class OverviewPage extends StatelessWidget {
             children: [
               _SectionTitle(
                 'Jouw weg door de Bijbel',
-                action: TextButton(
+                action: TextButton.icon(
                   onPressed: () => navigate(1),
-                  child: const Text('Open tracker ↗'),
+                  label: const Text('Open tracker'),
+                  icon: const Icon(Icons.north_east, size: 14),
+                  iconAlignment: IconAlignment.end,
                 ),
               ),
               const Text(
@@ -233,9 +235,11 @@ class OverviewPage extends StatelessWidget {
               if (notes.isNotEmpty)
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: TextButton(
+                  child: TextButton.icon(
                     onPressed: () => navigate(2),
-                    child: const Text('Alle notities ↗'),
+                    label: const Text('Alle notities'),
+                    icon: const Icon(Icons.north_east, size: 14),
+                    iconAlignment: IconAlignment.end,
                   ),
                 ),
             ],
@@ -245,9 +249,11 @@ class OverviewPage extends StatelessWidget {
             children: [
               _SectionTitle(
                 'Jouw leesplannen',
-                action: TextButton(
+                action: TextButton.icon(
                   onPressed: () => navigate(3),
-                  child: const Text('Bekijk alles ↗'),
+                  label: const Text('Bekijk alles'),
+                  icon: const Icon(Icons.north_east, size: 14),
+                  iconAlignment: IconAlignment.end,
                 ),
               ),
               const SizedBox(height: 14),
@@ -459,9 +465,16 @@ class _ActivePlan extends StatelessWidget {
                 style: const TextStyle(fontSize: 12, color: muted),
               ),
               const SizedBox(height: 14),
-              const Text(
-                'Verder met dit plan →',
-                style: TextStyle(color: sage, fontWeight: FontWeight.w600),
+              const Wrap(
+                spacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    'Verder met dit plan',
+                    style: TextStyle(color: sage, fontWeight: FontWeight.w600),
+                  ),
+                  Icon(Icons.arrow_forward, color: sage, size: 14),
+                ],
               ),
             ],
           ),

@@ -22,12 +22,27 @@ async function main() {
   const browser = await chromium.launch({headless:true, executablePath:process.env.CHROME_EXECUTABLE || undefined});
   const context = await browser.newContext({viewport:{width:1600,height:1200},acceptDownloads:true});
   const page = await context.newPage();
+  if (process.env.PWA_TEST_CPU_RATE) {
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', {rate:Number(process.env.PWA_TEST_CPU_RATE)});
+  }
   const errors = [];
   page.on('pageerror', error => errors.push(String(error)));
   const button = name => page.getByRole('button', {name, exact:true});
   const field = name => page.getByRole('textbox', {name, exact:name.startsWith('Titel')});
   const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const fill = async (name, value) => { await field(name).click(); await frames(); await field(name).fill(value); await frames(); };
+  const expectValue = async (name, value) => {
+    await field(name).click();
+    // Flutter restores the editing element after focus/dialog transitions.
+    // The semantics node can already be present while its input is still empty.
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      if (await field(name).inputValue() === value) return;
+      await frames();
+    }
+    assert.equal(await field(name).inputValue(), value);
+  };
   const semantics = async () => {
     await page.locator('flt-semantics-placeholder').waitFor();
     await page.locator('flt-semantics-placeholder').dispatchEvent('click');
@@ -53,8 +68,7 @@ async function main() {
     // Sidebar stays available during editing and protects unsaved work.
     await button('Instellingen').click();
     await button('Annuleren').click();
-    await field('Titel').click();
-    assert.equal(await field('Titel').inputValue(), 'Twee dagen van aandacht');
+    await expectValue('Titel', 'Twee dagen van aandacht');
     await fill('Aantal dagen / sessies', '3');
     await button('Sessie 3').click();
     await fill('Overdenking en vragen', 'Deze tekst blijft bij het tijdelijk inkorten bewaard.');
@@ -62,8 +76,7 @@ async function main() {
     await fill('Aantal dagen / sessies', '3');
     // The existing expansion may remain open; no controller may be discarded.
     if (!await field('Overdenking en vragen').isVisible()) await button('Sessie 3').click();
-    await field('Overdenking en vragen').click();
-    assert.equal(await field('Overdenking en vragen').inputValue(), 'Deze tekst blijft bij het tijdelijk inkorten bewaard.');
+    await expectValue('Overdenking en vragen', 'Deze tekst blijft bij het tijdelijk inkorten bewaard.');
     await fill('Aantal dagen / sessies', '2');
     await shot('design-plan-editor');
     await button('Opslaan').click();
@@ -134,9 +147,7 @@ async function main() {
     await button('Navigatiemenu openen').click();
     await button('Instellingen').click();
     await button('Annuleren').click();
-    await field('Wat wil je bewaren?').click();
-    await frames();
-    assert.equal(await field('Wat wil je bewaren?').inputValue(), 'Nog niet opgeslagen op de telefoon');
+    await expectValue('Wat wil je bewaren?', 'Nog niet opgeslagen op de telefoon');
     await button('Navigatiemenu openen').click();
     await button('Instellingen').click();
     await button('Wijzigingen laten vervallen').click();
