@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mosterdzaad/domain/entry.dart';
@@ -70,6 +71,41 @@ void main() {
     );
     expect(files.contents, before);
   });
+  test(
+    'Permanent deletion resumes after interruption between marker and payload',
+    () async {
+      final original = await repo.save(
+        'note',
+        noteData(bible, body: 'SECRET-erase-all-revisions'),
+      );
+      final deleted = await repo.save(
+        'note',
+        original.data,
+        entityId: original.id,
+        expected: [original.revision],
+        deleted: true,
+      );
+      files.failRemoveAt = 2;
+      await expectLater(
+        repo.permanentlyDelete(deleted),
+        throwsA(isA<FileSystemException>()),
+      );
+      final reopened = VaultRepository(files, bible);
+      await reopened.reload();
+      expect(reopened.permanentlyDeleted, contains(original.id));
+      expect(
+        files.contents.values.any(
+          (text) => text.contains('SECRET-erase-all-revisions'),
+        ),
+        isFalse,
+      );
+      expect(reopened.entries.any((entry) => entry.id == original.id), isFalse);
+      expect(
+        (await reopened.snapshot()).encode(),
+        isNot(contains('SECRET-erase-all-revisions')),
+      );
+    },
+  );
   test('Stale edits merge without replacing another writer', () async {
     final first = await repo.save(
       'note',
@@ -291,4 +327,42 @@ void main() {
       }
     },
   );
+  test('Permanent deletion also clears the on-disk SQLite cache', () async {
+    final dir = await Directory.systemTemp.createTemp('mosterdzaad-erasure-');
+    final file = File('${dir.path}/index.sqlite');
+    final index = SearchIndex(file);
+    try {
+      final note = await repo.save(
+        'note',
+        noteData(bible, body: 'UNIQUE-PRIVATE-CACHE-TEXT'),
+      );
+      await index.rebuild(repo.entries);
+      expect(
+        await index.search('UNIQUE-PRIVATE-CACHE-TEXT'),
+        contains(note.id),
+      );
+      final trashed = await repo.save(
+        'note',
+        note.data,
+        entityId: note.id,
+        expected: [note.revision],
+        deleted: true,
+      );
+      await repo.permanentlyDelete(trashed);
+      await index.rebuild(repo.entries);
+      await index.compact();
+      expect(await index.search('UNIQUE-PRIVATE-CACHE-TEXT'), isEmpty);
+      await for (final cache in dir.list()) {
+        if (cache is File) {
+          expect(
+            latin1.decode(await cache.readAsBytes()).toLowerCase(),
+            isNot(contains('unique-private-cache-text')),
+          );
+        }
+      }
+    } finally {
+      await index.close();
+      await dir.delete(recursive: true);
+    }
+  });
 }

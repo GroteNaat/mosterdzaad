@@ -23,26 +23,35 @@ class SearchIndex extends GeneratedDatabase {
       );
     },
   );
-  Future<void> rebuild(List<Entry> entries) => transaction(() async {
-    await customStatement('DELETE FROM search_entries');
-    final titles = {for (final e in entries) e.id: e.title};
-    for (final e in entries) {
-      final related = [
-        'themes',
-        'plans',
-        'studies',
-      ].expand(e.links).map((id) => titles[id] ?? '').join(' ');
-      await customStatement(
-        'INSERT INTO search_entries (id, kind, text) VALUES (?, ?, ?)',
-        [
-          e.id,
-          e.kind,
-          '${e.title} ${e.text('body')} ${e.text('description')} ${e.text('references')} $related'
-              .toLowerCase(),
-        ],
-      );
-    }
-  });
+  Future<void> rebuild(List<Entry> entries) async {
+    await customStatement('PRAGMA secure_delete=ON');
+    await transaction(() async {
+      await customStatement('DELETE FROM search_entries');
+      final titles = {for (final e in entries) e.id: e.title};
+      for (final e in entries) {
+        final related = [
+          'themes',
+          'plans',
+          'studies',
+        ].expand(e.links).map((id) => titles[id] ?? '').join(' ');
+        await customStatement(
+          'INSERT INTO search_entries (id, kind, text) VALUES (?, ?, ?)',
+          [
+            e.id,
+            e.kind,
+            '${e.title} ${e.text('body')} ${e.text('description')} ${e.text('references')} $related'
+                .toLowerCase(),
+          ],
+        );
+      }
+    });
+  }
+
+  Future<void> compact() async {
+    await customStatement('VACUUM');
+    await customStatement('PRAGMA wal_checkpoint(TRUNCATE)');
+  }
+
   Future<Set<String>> search(String query) async {
     final escaped = query
         .toLowerCase()

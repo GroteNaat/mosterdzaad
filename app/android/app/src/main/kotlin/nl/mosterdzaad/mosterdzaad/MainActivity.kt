@@ -89,6 +89,10 @@ class MainActivity : FlutterActivity() {
                 } else null
             }
             "list" -> children(tree, existing ?: error("Map ontbreekt")).map { it.first }
+            "remove" -> {
+                if (existing != null) require(DocumentsContract.deleteDocument(contentResolver, existing)) { "Verwijderen mislukt" }
+                null
+            }
             "read" -> if (existing == null) null else contentResolver.openInputStream(existing)?.use {
                 val output = ByteArrayOutputStream()
                 val buffer = ByteArray(8192)

@@ -10,6 +10,9 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
     ..addFont(rootBundle.load('assets/fonts/roboto-bold.ttf'));
   await font.load();
   await (FontLoader(
+    'Lora',
+  )..addFont(rootBundle.load('assets/fonts/lora.ttf'))).load();
+  await (FontLoader(
     'MaterialIcons',
   )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
   WidgetController.hitTestWarningShouldBeFatal = true;

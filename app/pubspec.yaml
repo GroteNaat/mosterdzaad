@@ -1,7 +1,7 @@
 name: mosterdzaad
 description: Persoonlijke Bijbelstudie met een studieboek op je eigen apparaat.
 publish_to: none
-version: 0.3.0+2
+version: 0.4.0+3
 environment:
   sdk: '>=3.14.0 <4.0.0'
 dependencies:
@@ -36,6 +36,9 @@ dependency_overrides:
 flutter:
   uses-material-design: true
   fonts:
+    - family: Lora
+      fonts:
+        - asset: assets/fonts/lora.ttf
     - family: Roboto
       fonts:
         - asset: assets/fonts/roboto-regular.ttf
@@ -46,6 +49,7 @@ flutter:
     - assets/data/books-original.json
     - assets/data/DATA-SOURCES.md
     - assets/fonts/roboto_license.txt
+    - assets/fonts/lora_license.txt
     - assets/licenses/loro-license.txt
     - assets/licenses/loro-third-party.txt
     - assets/licenses/libsodium-license.txt

@@ -79,6 +79,13 @@ void syncDispatcher() {
       for (final entry in (job['outbox'] as Map).entries) {
         if (watch.elapsed > const Duration(seconds: 20)) return false;
         if (await secrets.read('dropbox-refresh') != refresh) return true;
+        if (!await backgroundMayUpload(
+          cloud,
+          dataset,
+          Set<String>.from(job['knownPurges'] as List? ?? []),
+        )) {
+          return true;
+        }
         final current = await store.read('background-$book');
         if (current == null ||
             !((jsonDecode(current) as Map)['outbox'] as Map).containsKey(

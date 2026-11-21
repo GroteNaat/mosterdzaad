@@ -131,6 +131,7 @@ jobs:
           dart --disable-dart-dev tool/prepare_pwa.dart
           npm install --prefix "$RUNNER_TEMP/pwa-test" --no-save --no-audit --no-fund playwright@1.62.1
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/pwa-test/node_modules/playwright" node tool/test_pwa.cjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/pwa-test/node_modules/playwright" node tool/test_design.cjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/pwa-test/node_modules/playwright" node tool/test_sync_browser.cjs
           mkdir -p build/packages
           cd build/web

@@ -25,7 +25,19 @@ Kopieer de **hele map**, inclusief commitmarkers en pending-bestanden waarnaar z
 
 Het portable formaat mosterdzaad-snapshot, versie 1, bevat uitsluitend het manifest en canonieke records/<revision>.md|json-inhoud. De lokale commitstructuur wordt hiervoor uitgepakt. Maprechten, SQLite, OAuth en DEK ontbreken. Herstel valideert alle records, ouders en de acyclische grafiek en publiceert het manifest als laatste in een nieuwe map. Een cloudherstelpunt wordt als afzonderlijk boek geopend zodat nieuwere wijzigingen behouden blijven.
 
-Een volledige cloudback-up inclusief CRDT-geschiedenis en controlemetadata is maximaal 20 MiB. Individuele lokale records zijn begrensd tot 8 MiB. Er is geen fysieke verwijdering van lokale tombstones/geschiedenis. Handmatige edits zijn geen ondersteunde manier om nieuwe wijzigingen te maken.
+Een volledige cloudback-up inclusief CRDT-geschiedenis en controlemetadata is maximaal 20 MiB. Individuele lokale records zijn begrensd tot 8 MiB. Geschiedenis blijft behouden tot expliciet definitief verwijderen. Handmatige edits zijn geen ondersteunde manier om nieuwe wijzigingen te maken.
+
+## Definitief verwijderen
+
+De prullenbak heeft naast **Terugzetten** een knop **Definitief verwijderen**, met een bevestigingsvenster. Dit schrijft eerst een duurzaam `purge`-record met uitsluitend willekeurige object-/revisie-ID's, het onderdeeltype en hashes. Er staat geen titel, tekst of Loro-update van het gewiste onderdeel in dit bewijs. Daarna verdwijnen alle lokale revisies van dat onderdeel, inclusief tombstones, publicatiemarkers en achtergebleven complete pending-bestanden. Bij een onderbreking wordt het opruimen bij opnieuw openen hervat. De zoekindex wordt opnieuw opgebouwd met SQLite `secure_delete` en gecompacteerd.
+
+Een oude bewerking of reservekopie met dezelfde object-ID kan het onderdeel niet terugbrengen. Cloudherstelpunten krijgen de actuele wisbewijzen toegepast voordat een afzonderlijk hersteld boek nieuwe ID's krijgt. Leesplansessies houden bij kopiëren hun koppelingen met notities.
+
+Bij synchronisatie wordt eerst een nieuwe, gecontroleerde back-up gemaakt waarin de overige geschiedenis bewaard blijft. Daarna verwijdert de app de bijbehorende wijzigingsbestanden en oude back-ups uit de actieve Dropbox-map. Als een beschadigde back-up niet gecontroleerd kan worden, meldt synchronisatie dat het wissen in Dropbox nog niet volledig is afgerond. Offline apparaten wissen hun lokale kopieën bij de volgende voorgrondsynchronisatie. Een versleuteld wiskenmerk voorkomt dat een nog niet bijgewerkte achtergrondtaak oude wijzigingen blind uploadt; een reeds lopende aanvraag kan pas bij een volgende synchronisatie worden opgeruimd.
+
+Gebruik hiervoor **0.4.0 of nieuwer op alle apparaten**. Oudere apps begrijpen het nieuwe recordtype niet. Een volledige kopie die eerder is geëxporteerd, een ander studieboek met andere ID's en systeem-/providerback-ups vallen buiten de wisprocedure. Het verwijderen van bestanden is geen forensisch gegarandeerd overschrijven van schijf-, browser- of geheugensectoren.
+
+**Dropbox bewaart zelf herstelgeschiedenis.** De API voor direct permanent wissen is alleen beschikbaar voor Dropbox Business-apps; deze App folder-koppeling kan die niet gebruiken. Verwijder resterende herstelkopieën in Dropbox handmatig als die ook onherstelbaar weg moeten. Zie [Dropbox permanent-delete API](https://docs.dropboxapi.com/dropbox-api/api-reference/user-endpoints/files/permanently-delete) en [bestanden definitief verwijderen](https://help.dropbox.com/delete-restore/delete-files).
 
 ## Sleutels, status en platformtoegang
 

@@ -23,6 +23,9 @@ Future<void> main() async {
       yield LicenseEntryWithLineBreaks([
         'Roboto',
       ], await rootBundle.loadString('assets/fonts/roboto_license.txt'));
+      yield LicenseEntryWithLineBreaks([
+        'Lora',
+      ], await rootBundle.loadString('assets/fonts/lora_license.txt'));
       for (final name in [
         'loro-license',
         'loro-third-party',
@@ -73,7 +76,9 @@ class MosterdzaadApp extends StatelessWidget {
       locale: const Locale('nl'),
       supportedLocales: const [Locale('nl')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      home: app.repository == null ? WelcomeScreen(app) : NotebookShell(app),
+      home: app.repository == null
+          ? WelcomeScreen(app)
+          : NotebookShell(app, key: ValueKey(app.repository!.id)),
     ),
   );
 }

@@ -8,6 +8,9 @@ import '../domain/entry.dart';
 import 'common.dart';
 import 'editor.dart';
 import 'sync_panel.dart';
+import 'brand.dart';
+import 'overview.dart';
+import '../domain/plan_progress.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -20,7 +23,19 @@ class NotebookShell extends StatefulWidget {
 
 class _NotebookShellState extends State<NotebookShell>
     with WidgetsBindingObserver {
-  int page = 0;
+  final selection = ValueNotifier<int>(0);
+  final contentNavigator = GlobalKey<NavigatorState>();
+  int get page => selection.value;
+  Future<void> navigate(int value) async {
+    if (widget.app.beforeNavigation != null &&
+        !await widget.app.beforeNavigation!()) {
+      return;
+    }
+    if (!mounted) return;
+    contentNavigator.currentState?.popUntil((route) => route.isFirst);
+    setState(() => selection.value = value);
+  }
+
   static const labels = [
     'Overzicht',
     'Bijbeltracker',
@@ -48,6 +63,7 @@ class _NotebookShellState extends State<NotebookShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    selection.dispose();
     super.dispose();
   }
 
@@ -67,137 +83,251 @@ class _NotebookShellState extends State<NotebookShell>
   @override
   Widget build(BuildContext context) {
     final app = widget.app;
-    final wide = MediaQuery.sizeOf(context).width >= 980;
-    final child = switch (page) {
-      0 => OverviewPage(app),
-      1 => TrackerPage(app),
-      2 => NotesPage(app),
-      3 => CollectionPage(app, 'plan'),
-      4 => CollectionPage(app, 'study'),
-      5 => CollectionPage(app, 'theme'),
-      _ => SettingsPage(app),
-    };
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(app.repository!.name),
-        actions: [
-          if (app.syncEnabled)
-            IconButton(
-              tooltip:
-                  app.syncError ??
-                  (app.syncing
-                      ? 'Synchroniseren…'
-                      : 'Synchroniseren met Dropbox'),
-              onPressed: app.syncing ? null : app.syncNow,
-              icon: Icon(
-                app.syncError != null
-                    ? Icons.cloud_off_outlined
-                    : Icons.cloud_done_outlined,
-              ),
-            ),
-          if (app.busy)
+    final size = MediaQuery.sizeOf(context);
+    final wide =
+        size.width >= 900 || (size.width >= 700 && size.width > size.height);
+    Widget navigation({bool drawer = false}) => Container(
+      width: size.width < 900 ? 210 : 236,
+      color: sidebarGreen,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
             const Padding(
-              padding: EdgeInsets.all(16),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+              padding: EdgeInsets.fromLTRB(18, 24, 12, 24),
+              child: FittedBox(
+                alignment: Alignment.centerLeft,
+                fit: BoxFit.scaleDown,
+                child: Brand(),
               ),
             ),
-          IconButton(
-            tooltip: 'Studieboek vernieuwen',
-            onPressed: app.busy ? null : app.refresh,
-            icon: const Icon(Icons.refresh),
-          ),
-          IconButton(
-            tooltip: 'Nieuwe notitie',
-            onPressed: () => editEntry(context, app, 'note'),
-            icon: const Icon(Icons.note_add_outlined),
-          ),
-        ],
-      ),
-      drawer: wide
-          ? null
-          : Drawer(
-              child: SafeArea(
-                child: ListView(
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text(
-                        'mosterdzaad',
-                        style: TextStyle(fontSize: 27, color: sage),
-                      ),
+            if (size.height > 500)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(24, 12, 24, 12),
+                child: Text(
+                  'MIJN STUDIEPLEK',
+                  style: TextStyle(
+                    fontSize: 10,
+                    letterSpacing: 1.8,
+                    color: muted,
+                  ),
+                ),
+              ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: [
+                  for (var i = 0; i < labels.length - 1; i++)
+                    _NavigationItem(
+                      labels[i],
+                      icons[i],
+                      selected: page == i,
+                      onTap: () {
+                        if (drawer) Navigator.pop(context);
+                        navigate(i);
+                      },
                     ),
-                    for (var i = 0; i < labels.length; i++)
-                      ListTile(
-                        leading: Icon(icons[i]),
-                        title: Text(labels[i]),
-                        selected: page == i,
-                        onTap: () {
-                          setState(() => page = i);
-                          Navigator.pop(context);
-                        },
-                      ),
+                ],
+              ),
+            ),
+            if (size.height > 700)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Divider(color: Color(0xFFD6DEC9)),
+                    const SizedBox(height: 16),
+                    const Icon(Icons.auto_awesome, size: 17, color: gold),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Kleine momenten.\nDiepe wortels.',
+                      style: editorial.copyWith(fontSize: 18, height: 1.5),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Open je Bijbel. Neem de tijd.',
+                      style: TextStyle(fontSize: 11, color: muted),
+                    ),
                   ],
                 ),
               ),
-            ),
-      body: SafeArea(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (wide)
-              NavigationRail(
-                extended: true,
-                minExtendedWidth: 218,
-                selectedIndex: page,
-                onDestinationSelected: (i) => setState(() => page = i),
-                leading: const Padding(
-                  padding: EdgeInsets.fromLTRB(12, 20, 12, 28),
-                  child: Text(
-                    'mosterdzaad',
-                    style: TextStyle(
-                      fontSize: 25,
-                      color: sage,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                destinations: [
-                  for (var i = 0; i < labels.length; i++)
-                    NavigationRailDestination(
-                      icon: Icon(icons[i]),
-                      label: Text(labels[i]),
-                    ),
-                ],
-              ),
-            Expanded(
-              child: Column(
-                children: [
-                  if (app.error != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Notice(app.error!, error: true),
-                    ),
-                  if (app.repository!.warnings.isNotEmpty ||
-                      app.repository!.conflicts.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Notice(
-                        'Je studieboek heeft bestanden die aandacht nodig hebben. Bekijk Instellingen → Herstel en geschiedenis.',
-                        error: true,
-                      ),
-                    ),
-                  Expanded(child: child),
-                ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+              child: _NavigationItem(
+                'Instellingen',
+                Icons.tune,
+                selected: page == 6,
+                onTap: () {
+                  if (drawer) Navigator.pop(context);
+                  navigate(6);
+                },
               ),
             ),
           ],
         ),
       ),
     );
+    final content = Column(
+      children: [
+        if (app.error != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Notice(app.error!, error: true),
+          ),
+        if (app.repository!.warnings.isNotEmpty ||
+            app.repository!.conflicts.isNotEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20),
+            child: Notice(
+              'Je studieboek heeft bestanden die aandacht nodig hebben. Bekijk Instellingen → Herstel en geschiedenis.',
+              error: true,
+            ),
+          ),
+        Expanded(
+          child: NavigatorPopHandler<Object?>(
+            onPopWithResult: (_) => contentNavigator.currentState?.maybePop(),
+            child: Semantics(
+              container: true,
+              explicitChildNodes: true,
+              child: Navigator(
+                key: contentNavigator,
+                onGenerateRoute: (_) => MaterialPageRoute<void>(
+                  builder: (_) => AnimatedBuilder(
+                    animation: Listenable.merge([widget.app, selection]),
+                    builder: (context, _) => switch (page) {
+                      0 => OverviewPage(widget.app, navigate: navigate),
+                      1 => TrackerPage(widget.app),
+                      2 => NotesPage(widget.app),
+                      3 => CollectionPage(widget.app, 'plan'),
+                      4 => CollectionPage(widget.app, 'study'),
+                      5 => CollectionPage(widget.app, 'theme'),
+                      _ => SettingsPage(widget.app),
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+    final actions = <Widget>[
+      if (app.syncEnabled)
+        IconButton(
+          tooltip:
+              app.syncError ??
+              (app.syncing ? 'Synchroniseren…' : 'Synchroniseren met Dropbox'),
+          onPressed: app.syncing ? null : app.syncNow,
+          icon: Icon(
+            app.syncError != null || app.syncOffline
+                ? Icons.cloud_off_outlined
+                : Icons.cloud_done_outlined,
+            size: 20,
+          ),
+        ),
+      if (app.busy)
+        const Padding(
+          padding: EdgeInsets.all(14),
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      IconButton(
+        tooltip: 'Studieboek vernieuwen',
+        onPressed: app.busy ? null : app.refresh,
+        icon: const Icon(Icons.refresh, size: 20),
+      ),
+    ];
+    return Scaffold(
+      drawer: wide ? null : Drawer(child: navigation(drawer: true)),
+      appBar: wide
+          ? null
+          : AppBar(title: const Brand(compact: true), actions: actions),
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (wide) navigation(),
+          Expanded(
+            child: SafeArea(
+              child: Column(
+                children: [
+                  if (wide)
+                    Container(
+                      height: 58,
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      decoration: const BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: Color(0xFFE5E8DD)),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Een moment voor het Woord',
+                              style: TextStyle(color: muted, fontSize: 12),
+                            ),
+                          ),
+                          Text(
+                            shortDate(DateTime.now()),
+                            style: const TextStyle(color: muted, fontSize: 12),
+                          ),
+                          const SizedBox(width: 18),
+                          ...actions,
+                        ],
+                      ),
+                    ),
+                  Expanded(child: content),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
+}
+
+class _NavigationItem extends StatelessWidget {
+  const _NavigationItem(
+    this.label,
+    this.icon, {
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Material(
+      color: selected ? const Color(0xFFDCE6D1) : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: ListTile(
+        dense: true,
+        minTileHeight: 48,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        selected: selected,
+        selectedColor: sage,
+        selectedTileColor: const Color(0xFFDCE6D1),
+        leading: Icon(icon, size: 21, color: selected ? sage : muted),
+        title: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+          ),
+        ),
+        onTap: onTap,
+      ),
+    ),
+  );
 }
 
 class PageBody extends StatelessWidget {
@@ -209,144 +339,13 @@ class PageBody extends StatelessWidget {
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 1180),
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 48),
+        padding: EdgeInsets.fromLTRB(
+          MediaQuery.sizeOf(context).width < 600 ? 18 : 32,
+          32,
+          MediaQuery.sizeOf(context).width < 600 ? 18 : 32,
+          48,
+        ),
         children: children,
-      ),
-    ),
-  );
-}
-
-class OverviewPage extends StatelessWidget {
-  const OverviewPage(this.app, {super.key});
-  final AppController app;
-  @override
-  Widget build(BuildContext context) {
-    final books = app.bible.books(
-      app.repository!.scheme,
-      extra: app.repository!.extra,
-    );
-    final c = app.covered;
-    final total = books.fold(0, (n, b) => n + b.verseCount);
-    final done = books.fold(
-      0,
-      (n, b) =>
-          n +
-          List.generate(
-            b.chapters.length,
-            (i) => c['${b.code}:${i + 1}']?.length ?? 0,
-          ).fold(0, (a, v) => a + v),
-    );
-    return PageBody([
-      PageHeading(
-        'Ruimte om te groeien.',
-        'Lees, verwonder en bewaar wat je raakt.',
-        action: FilledButton.icon(
-          onPressed: () => editEntry(context, app, 'note'),
-          icon: const Icon(Icons.add),
-          label: const Text('Nieuwe notitie'),
-        ),
-      ),
-      Container(
-        padding: const EdgeInsets.all(28),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE9EDE2),
-          borderRadius: BorderRadius.circular(22),
-        ),
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.spa_outlined, size: 46, color: sage),
-            SizedBox(height: 20),
-            Text(
-              'Een open Bijbel.\nEen aandachtig hart.',
-              style: TextStyle(
-                fontSize: 31,
-                height: 1.3,
-                color: Color(0xFF31402D),
-              ),
-            ),
-            SizedBox(height: 14),
-            Text(
-              'Je hoeft niet alles tegelijk te ontdekken.\nBegin met een passage en schrijf op wat je opvalt.',
-              style: TextStyle(height: 1.7),
-            ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 24),
-      Wrap(
-        spacing: 16,
-        runSpacing: 16,
-        children: [
-          _Stat('$done', 'Verzen met een notitie'),
-          _Stat('${app.ofKind('note').length}', 'Bewaarde gedachten'),
-          _Stat('${app.ofKind('study').length}', 'Bijbelstudies'),
-        ],
-      ),
-      const SizedBox(height: 24),
-      Text(
-        'Jouw weg door de Bijbel',
-        style: Theme.of(context).textTheme.titleLarge,
-      ),
-      const SizedBox(height: 12),
-      LinearProgressIndicator(
-        value: total == 0 ? 0 : done / total,
-        minHeight: 8,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      const SizedBox(height: 8),
-      Text(
-        '${(100 * done / total).toStringAsFixed(1)}% van de verzen heeft een notitie. Je bepaalt zelf je ritme.',
-      ),
-      const SizedBox(height: 32),
-      Text('Laatste gedachten', style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 12),
-      if (app.ofKind('note').isEmpty)
-        EmptyState(
-          'Hier begint je verzameling.',
-          'Kies een passage, thema, leesplan of studie en schrijf je eerste gedachte.',
-          action: TextButton(
-            onPressed: () => editEntry(context, app, 'note'),
-            child: const Text('Schrijf een notitie'),
-          ),
-        ),
-      for (final n in app.ofKind('note').take(5)) NoteCard(app, n),
-      const SizedBox(height: 20),
-      Text(
-        kIsWeb
-            ? 'Opgeslagen in deze browser'
-            : 'Opgeslagen in ${app.repository!.files.location.label}',
-        style: const TextStyle(color: Colors.black54),
-      ),
-    ]);
-  }
-}
-
-class _Stat extends StatelessWidget {
-  const _Stat(this.value, this.label);
-  final String value, label;
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 230,
-    child: Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 35,
-                color: sage,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
       ),
     ),
   );
@@ -364,7 +363,7 @@ class NoteCard extends StatelessWidget {
         note.title,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontWeight: FontWeight.w600),
+        style: editorial.copyWith(fontSize: 20),
       ),
       subtitle: Padding(
         padding: const EdgeInsets.only(top: 8),
@@ -943,10 +942,11 @@ class _PlanSession extends StatelessWidget {
         .map((p) => Passage.fromJson(Map<String, dynamic>.from(p as Map)))
         .toList();
     final progress = passageProgress(passages, app.covered);
+    final completed = sessionHasNote(plan, number, app.ofKind('note'));
     return Card(
       child: ExpansionTile(
         leading: Icon(
-          progress == 1 ? Icons.check_circle : Icons.circle_outlined,
+          completed ? Icons.check_circle : Icons.circle_outlined,
           color: sage,
         ),
         title: Text(
@@ -970,6 +970,7 @@ class _PlanSession extends StatelessWidget {
               initial: {
                 'references': s['references'],
                 'plans': [plan.id],
+                'planSessions': [sessionLink(plan, number)],
               },
             ),
             icon: const Icon(Icons.edit_note),
@@ -1223,11 +1224,37 @@ class SettingsPage extends StatelessWidget {
         ListTile(
           title: Text(e.title),
           subtitle: Text(shortDate(e.updated)),
-          trailing: TextButton(
-            onPressed: () => app.run(() async {
-              await app.save(e.kind, copyData(e), original: e);
-            }),
-            child: const Text('Terugzetten'),
+          trailing: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              TextButton(
+                onPressed: app.busy || app.syncing
+                    ? null
+                    : () => app.run(() async {
+                        await app.save(e.kind, copyData(e), original: e);
+                      }),
+                child: const Text('Terugzetten'),
+              ),
+              IconButton(
+                tooltip: 'Definitief verwijderen',
+                icon: const Icon(Icons.delete_forever_outlined),
+                color: Theme.of(context).colorScheme.error,
+                onPressed: app.busy || app.syncing
+                    ? null
+                    : () async {
+                        if (await confirm(
+                          context,
+                          'Definitief verwijderen?',
+                          '“${e.title}” en alle eerdere lokale versies worden gewist. Dit kan niet ongedaan worden gemaakt.\n\n'
+                              'Bij synchronisatie worden ook bijbehorende wijzigingen en oudere back-ups uit de actieve Dropbox-map verwijderd. Andere apparaten volgen zodra ze synchroniseren.\n\n'
+                              'Dropbox kan verwijderde bestanden nog bewaren in zijn eigen herstelgeschiedenis; verwijder ze daar handmatig voor definitief wissen. Zelf geëxporteerde kopieën worden niet aangepast.',
+                          action: 'Definitief verwijderen',
+                        )) {
+                          await app.run(() => app.permanentlyDelete(e));
+                        }
+                      },
+              ),
+            ],
           ),
         ),
       const SizedBox(height: 24),
@@ -1238,7 +1265,7 @@ class SettingsPage extends StatelessWidget {
         onPressed: () => showLicensePage(
           context: context,
           applicationName: 'Mosterdzaad',
-          applicationVersion: '0.2.0',
+          applicationVersion: '0.4.0',
         ),
         child: const Text('Over Mosterdzaad en licenties'),
       ),

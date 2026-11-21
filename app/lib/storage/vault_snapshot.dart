@@ -4,13 +4,35 @@ import 'package:uuid/uuid.dart';
 
 import '../domain/bible.dart';
 import '../domain/entry.dart';
+import '../domain/plan_progress.dart';
 import 'vault_repository.dart';
 import 'vault_types.dart';
 
 /// One atomic Dropbox object / portable backup. Only canonical studybook data.
 /// SQLite, folder permissions and OAuth credentials are never included.
 class VaultSnapshot implements VaultFiles {
-  VaultSnapshot(Map<String, String> files) : contents = Map.unmodifiable(files);
+  VaultSnapshot(Map<String, String> files)
+    : contents = Map.unmodifiable(_redact(files));
+  static Map<String, String> _redact(Map<String, String> files) {
+    final records = <String, Entry>{};
+    for (final e in files.entries.where((e) => e.key.startsWith('records/'))) {
+      try {
+        final entry = Entry.decode(e.value, e.key.split('/').last);
+        if (entry.kind == 'purge') validatePurge(entry.data);
+        records[e.key] = entry;
+      } on FormatException {
+        /* validate() reports malformed data. */
+      } on TypeError {
+        /* validate() reports malformed data. */
+      }
+    }
+    final erased = purgedIds(records.values);
+    return {
+      for (final e in files.entries)
+        if (!erased.contains(records[e.key]?.id)) e.key: e.value,
+    };
+  }
+
   static const maxBytes = 20 * 1024 * 1024;
   final Map<String, String> contents;
   Map get manifest => jsonDecode(contents['mosterdzaad.json']!) as Map;
@@ -98,6 +120,23 @@ class VaultSnapshot implements VaultFiles {
     return VaultSnapshot(combined);
   }
 
+  /// Apply permanent deletions without importing newer edits into a restore
+  /// point. This must happen before copying it to a new set of identities.
+  VaultSnapshot applyDeletions(VaultSnapshot current) {
+    if (id != current.id) {
+      throw const FormatException('Dit is een ander studieboek.');
+    }
+    return union(
+      VaultSnapshot({
+        'mosterdzaad.json': contents['mosterdzaad.json']!,
+        for (final e in current.contents.entries)
+          if (e.key.startsWith('records/') &&
+              Entry.decode(e.value, e.key.split('/').last).kind == 'purge')
+            e.key: e.value,
+      }),
+    );
+  }
+
   /// Copy a complete local history into a different book without reusing IDs
   /// or modifying the source. Its v1 representation is deterministically
   /// converted to Loro on read. This is an explicit merge/restore operation.
@@ -115,10 +154,16 @@ class VaultSnapshot implements VaultFiles {
     };
     final files = Map<String, String>.from(target.contents);
     for (final e in orderedRecords(source.history)) {
-      if (e.kind == 'preferences') continue;
+      if (e.kind == 'preferences' || e.kind == 'purge') continue;
       final data = Map<String, dynamic>.from(
         jsonDecode(jsonEncode(e.data)) as Map,
       );
+      if (e.kind == 'plan') {
+        data['sessions'] = [
+          for (var i = 0; i < e.sessions.length; i++)
+            {...e.sessions[i], 'id': sessionId(e, i)},
+        ];
+      }
       for (final field in ['themes', 'plans', 'studies']) {
         if (data[field] is List) {
           data[field] = (data[field] as List)
@@ -128,6 +173,15 @@ class VaultSnapshot implements VaultFiles {
       }
       if (data['group'] is String) {
         data['group'] = entities[data['group']] ?? data['group'];
+      }
+      if (data['planSessions'] is List) {
+        data['planSessions'] = (data['planSessions'] as List)
+            .cast<String>()
+            .map((link) {
+              final parts = link.split('/');
+              return '${entities[parts.first] ?? parts.first}/${parts.last}';
+            })
+            .toList();
       }
       final copy = Entry(
         id: entities[e.id]!,
@@ -196,6 +250,9 @@ class VaultSnapshot implements VaultFiles {
       throw UnsupportedError('Read-only snapshot');
   @override
   Future<void> makeDirectory(String name) async =>
+      throw UnsupportedError('Read-only snapshot');
+  @override
+  Future<void> remove(String name) async =>
       throw UnsupportedError('Read-only snapshot');
 }
 

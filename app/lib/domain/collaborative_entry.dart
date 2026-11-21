@@ -16,7 +16,7 @@ class CollaborativeEntry {
   final List<Entry> records; // Topologically sorted, one entity only.
   final _updates = <String, Uint8List>{};
   static const textFields = {'body', 'description'};
-  static const setFields = {'themes', 'plans', 'studies'};
+  static const setFields = {'themes', 'plans', 'studies', 'planSessions'};
 
   static String peer(String revision) => BigInt.parse(
     sha256

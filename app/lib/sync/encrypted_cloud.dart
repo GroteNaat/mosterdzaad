@@ -62,6 +62,34 @@ abstract interface class EncryptedCloud {
   Future<void> delete(String path, String revision);
 }
 
+/// A headless sender has no decryption key. Unknown erasure markers require
+/// foreground reconciliation before it may transport an older outbox.
+Future<bool> backgroundMayUpload(
+  EncryptedCloud cloud,
+  String dataset,
+  Set<String> knownPurges,
+) async {
+  final prefix = '/v2/$dataset/erasures/';
+  final active = <String>{};
+  String? cursor;
+  do {
+    final page = await cloud.list('/v2/$dataset/erasures', cursor: cursor);
+    for (final item in page.items.where((i) => i.path.startsWith(prefix))) {
+      if (item.deleted) {
+        active.remove(item.path);
+      } else {
+        active.add(item.path);
+      }
+    }
+    cursor = page.more ? page.cursor : null;
+  } while (cursor != null);
+  return active.every(
+    (path) => knownPurges.contains(
+      path.substring(prefix.length).replaceFirst('.enc', ''),
+    ),
+  );
+}
+
 class DropboxObjects implements EncryptedCloud {
   DropboxObjects(this.client, this.token);
   final http.Client client;

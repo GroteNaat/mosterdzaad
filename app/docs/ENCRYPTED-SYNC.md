@@ -24,13 +24,13 @@ De lokale database en zoekindex blijven **onversleuteld**. Een record bevat een 
 Elke edit krijgt een uit zijn willekeurige operatie-ID afgeleide 64-bits Loro-peer. De apparaat-actor is afzonderlijk persistent. Hierdoor kunnen twee editorvensters vanaf verschillende causale bases opslaan zonder dezelfde peer-teller opnieuw te gebruiken. Bestaande v1-geschiedenis wordt met deterministische actors ingelezen; bestaande bestanden worden niet overschreven. Een oud clientprogramma wordt door een formaatmarker tegen schrijven beschermd.
 
 - `body` en `description`: Loro-tekst. Markdown blijft tekst; er is geen nieuwe WYSIWYG-editor.
-- Thema-, plan- en studiekoppelingen: observed-remove-set met unieke toevoegingstags op Loro-maps. Een niet-geobserveerde gelijktijdige toevoeging blijft behouden.
+- Thema-, plan-, sessie- en studiekoppelingen: observed-remove-set met unieke toevoegingstags op Loro-maps. Een niet-geobserveerde gelijktijdige toevoeging blijft behouden.
 - Titel, overige metadata en leesplansessies: causale Loro-registers met een zichtbare meerwaardigheidsweergave bij concurrerende verschillende waarden. Keuze van metadata behoudt de samengevoegde tekst. Referentietekst en geparste passages vormen één register.
 - Volgorde van sessies: de sessielijst is één register; gelijktijdige verschillende ordeningen blijven als alternatieven beschikbaar. Dit is geen rijketekst-CRDT per sessie.
 - Verwijderen versus gelijktijdig bewerken: verwijderen wint zichtbaar in de prullenbak, met de samengevoegde tekst behouden. Herstellen observeert alle actuele koppen en schrijft een nieuwe operatie.
 - Kloktijden bepalen alleen weergave en back-upplanning, nooit de winnaar van een inhoudelijk conflict.
 
-De volledige causale geschiedenis blijft in snapshots. Er is geen shallow-history garbage collection. Daardoor kunnen ook lang offline gebleven apparaten hun eigen nog niet verstuurde wijzigingen opnieuw samenvoegen.
+De volledige causale geschiedenis van behouden onderdelen blijft in snapshots. Er is geen shallow-history garbage collection. Daardoor kunnen ook lang offline gebleven apparaten hun eigen nog niet verstuurde wijzigingen opnieuw samenvoegen. Expliciet definitief verwijderen wist alle revisies van één object; een inhoudsloos `purge`-record voorkomt wederopstanding. Dit vereist appversie 0.4.0 of hoger op alle apparaten.
 
 ## Cryptografie en sleutelbeheer
 
@@ -56,6 +56,7 @@ In de App folder:
 /v2/<dataset>/changes/<willekeurige-operatie-id>.enc
 /v2/<dataset>/snapshots/<willekeurige-snapshot-id>.enc
 /v2/<dataset>/transitions/<willekeurige-overgang-id>.enc
+/v2/<dataset>/erasures/<willekeurige-purge-revisie-id>.enc
 ```
 
 Geen boektitel, notitietitel of tekst in bestandsnamen. Dropbox ziet wel bestandsgroottes, aantallen, type/pad en verkeersmomenten. Het versleutelde bestandsformaat bevat uitsluitend protocolmetadata buiten de ciphertext. Alleen de cryptografische grenslaag mag uploaden; plaintextsnapshots worden daar geweigerd.
@@ -64,7 +65,7 @@ Een immutable upload gebruikt exclusieve `add`, geen autorename. De exacte ciphe
 
 Clients gebruiken `list_folder` en `continue`; cursors en objectversies blijven lokaal bewaard. Een verlopen cursor veroorzaakt een volledige inventarisatie, geen reset van lokale wijzigingen. Bekende ongewijzigde snapshots worden niet opnieuw gedownload. Synchronisatie wordt gestart bij het openen van een gekoppeld studieboek, hervatten/vensterfocus, twee seconden na de laatste lokale opslag, een netwerkherstelmelding bij achtergebleven werk, of handmatig. Een gedeelde wachtrij bundelt gebeurtenissen en bewaart verzoeken tijdens opstarten of een lopende synchronisatie. Er is geen periodieke timer of longpoll; een inactief venster controleert Dropbox niet. Tijdelijke netwerkfouten binnen een gestarte aanvraag krijgen begrensde herhaalde pogingen; daarna wacht de duurzame wachtrij op een nieuwe gebeurtenis. Een gelijktijdig gebruikt tweede apparaat ontvangt wijzigingen bij zijn volgende synchronisatie. HTTP 429 respecteert Retry-After, tijdelijke fouten krijgen exponentiële vertraging met jitter. OAuth gebruikt PKCE/S256 en refresh tokens zonder app secret.
 
-Android WorkManager en iOS BGProcessing kunnen reeds versleutelde uitgaande wijzigingen transporteren wanneer het OS daarvoor tijd geeft. De taak opent geen gebruikersmap en wijzigt de voorgrondjournal niet. Inkomende gegevens worden bij actief gebruik/hervatten gevalideerd en toegepast. Desktop en PWA hebben geen betrouwbare gesloten-app-taak. Er is geen belofte van directe levering bij gesloten apps.
+Android WorkManager en iOS BGProcessing kunnen reeds versleutelde uitgaande wijzigingen transporteren wanneer het OS daarvoor tijd geeft. De taak opent geen gebruikersmap en wijzigt de voorgrondjournal niet. Zij controleert ook de `erasures`-map: onbekende wisbewijzen blokkeren verzending tot de voorgrond de actuele gegevens heeft verwerkt. Het bewijs bevat uitsluitend versleutelde ID's en hashes en blijft na compactie behouden. Inkomende gegevens worden bij actief gebruik/hervatten gevalideerd en toegepast. Desktop en PWA hebben geen betrouwbare gesloten-app-taak. Er is geen belofte van directe levering bij gesloten apps.
 
 ## Snapshots, herstel en opruimen
 
@@ -72,7 +73,9 @@ Standaard: volledige back-up na 100 wijzigingen of 24 uur tijdens synchronisatie
 
 Herstel maakt expliciet een **afzonderlijk lokaal studieboek**; het vervangt niet stilzwijgend nieuwere gegevens op andere apparaten. Bij koppelen met bestaande lokale inhoud kiest de gebruiker samenvoegen of het oorspronkelijke lokale studieboek apart bewaren. De bron blijft intact, ook bij geannuleerde mapkeuze.
 
-Opschonen maakt eerst een gecontroleerde nieuwe snapshot. Alleen veranderingen die door behouden geldige snapshots worden gedekt, kunnen via revision-voorwaardelijke delete worden verwijderd. Er blijven minstens twee herstelpunten; oudere snapshots worden alleen verwijderd wanneer hun volledige geschiedenis behouden blijft. Onzekere of beschadigde objecten worden niet verwijderd. De volledige lokale geschiedenis en tombstones blijven bestaan.
+Normaal opschonen maakt eerst een gecontroleerde nieuwe snapshot. Alleen veranderingen die door behouden geldige snapshots worden gedekt, kunnen via revision-voorwaardelijke delete worden verwijderd. Er blijven minstens twee herstelpunten; oudere snapshots worden alleen verwijderd wanneer hun volledige geschiedenis behouden blijft. Onzekere of beschadigde objecten worden niet verwijderd. De lokale geschiedenis en tombstones blijven bestaan.
+
+**Definitief verwijderen** heeft voorrang op dit bewaarbeleid. Een gecontroleerde, opgeschoonde snapshot bewaart alle niet-gewiste revisies voordat bijbehorende wijzigingen en historische snapshots via revision-voorwaardelijke delete verdwijnen. `erasedOperations` in de journal onderscheidt geautoriseerd wissen van ontbrekende bevestigde geschiedenis. Een verloren delete-antwoord kan veilig opnieuw worden verwerkt. Ontvangen offline wijzigingen voor een gewist object worden eveneens opgeruimd, ook als ze niet in het oorspronkelijke wisbewijs stonden. Oncontroleerbare snapshots geven een zichtbare melding dat wissen nog niet volledig is afgerond. Dropbox-eigen herstelgeschiedenis en externe kopieën vallen buiten deze API; zie [definitief verwijderen](STORAGE.md#definitief-verwijderen).
 
 Eerder bevestigde operatiehashes, envelopehashes en generaties signaleren ontbrekende of teruggezette geschiedenis. **Volledige rollback/verwijdering door een kwaadwillende provider is zonder onafhankelijke vertrouwde toestand niet volledig te bewijzen of te voorkomen**, vooral op een nieuw apparaat. Houd een onafhankelijke reservekopie.
 

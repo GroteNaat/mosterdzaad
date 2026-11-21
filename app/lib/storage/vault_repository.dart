@@ -34,10 +34,13 @@ class VaultRepository {
   List<String> warnings = [];
   Map<String, String> _fingerprints = {};
   Map<String, String> _recordContents = {};
+  Set<String> get permanentlyDeleted => purgedIds(history);
   Future<void> _queue = Future.value();
   List<Entry> get entries =>
       heads.values
-          .where((v) => v.length == 1 && !v.first.deleted)
+          .where(
+            (v) => v.length == 1 && !v.first.deleted && v.first.kind != 'purge',
+          )
           .map((v) => v.first)
           .toList()
         ..sort((a, b) => b.updated.compareTo(a.updated));
@@ -129,6 +132,7 @@ class VaultRepository {
     final problems = <String>[];
     final prints = <String, String>{};
     final sources = <String, String>{};
+    final physical = <String, List<String>>{};
     final names = await files.list('records');
     if (names.length > 300001) {
       throw const FormatException(
@@ -149,6 +153,7 @@ class VaultRepository {
           throw const FormatException('Ongeldige instellingen-ID.');
         }
         records.add(entry);
+        (physical[entry.revision] ??= []).add('records/$filename');
         sources['records/${entry.filename}'] = contents;
         prints[entry.revision] = sha256
             .convert(utf8.encode(contents))
@@ -185,6 +190,12 @@ class VaultRepository {
         );
       }
       final entry = Entry.decode(contents, commit['filename'] as String);
+      // Remove the publishing marker before its payload; a crash can only
+      // leave an unpublished payload, never a committed missing record.
+      (physical[entry.revision] ??= []).addAll([
+        'records/$marker',
+        'records/${commit['attempt']}.pending',
+      ]);
       final path = 'records/${entry.filename}';
       if (sources.containsKey(path)) {
         if (sources[path] != contents) {
@@ -195,6 +206,19 @@ class VaultRepository {
       records.add(entry);
       sources[path] = contents;
       prints[entry.revision] = entry.fileFingerprint!;
+    }
+    final erased = purgedIds(records);
+    if (erased.contains(j['id']) ||
+        records.any(
+          (e) => e.kind == 'purge' && (e.deleted || erased.contains(e.id)),
+        )) {
+      throw const FormatException('Ongeldige definitieve verwijdering.');
+    }
+    final discarded = records.where((e) => erased.contains(e.id)).toList();
+    records.removeWhere((e) => erased.contains(e.id));
+    for (final entry in discarded) {
+      sources.remove('records/${entry.filename}');
+      prints.remove(entry.revision);
     }
     final candidateHeads = revisionHeads(records);
     final prefs = candidateHeads[j['id']];
@@ -252,6 +276,37 @@ class VaultRepository {
     warnings = problems;
     _fingerprints = prints;
     _recordContents = sources;
+    // The purge record is durable before any bytes are removed. Retrying a
+    // partially completed cleanup is safe on disk, SAF, and IndexedDB.
+    if (files is! VaultSnapshot && erased.isNotEmpty) {
+      for (final entry in discarded) {
+        for (final path in physical[entry.revision] ?? <String>[]) {
+          await files.remove(path);
+        }
+      }
+      // Recover payloads left after an interruption between marker/payload removal.
+      for (final name in names.where((n) => n.endsWith('.pending'))) {
+        final path = 'records/$name', raw = await files.read('records/$name');
+        if (raw == null) continue;
+        try {
+          final markdown = raw.startsWith('---\n');
+          final metadata =
+              jsonDecode(markdown ? raw.split('\n')[1] : raw) as Map;
+          final entry = Entry.decode(
+            raw,
+            '${metadata['revision']}.${markdown ? 'md' : 'json'}',
+          );
+          if (erased.contains(entry.id)) {
+            await files.remove(path.replaceFirst('.pending', '.commit'));
+            await files.remove(path);
+          }
+        } on FormatException {
+          /* Unrelated incomplete writes stay untouched. */
+        } on TypeError {
+          /* Unrelated incomplete writes stay untouched. */
+        }
+      }
+    }
   }
 
   Future<void> _publish(Entry entry, String contents) async {
@@ -360,6 +415,11 @@ class VaultRepository {
         );
       }
       final targetId = entityId ?? const Uuid().v4();
+      if (permanentlyDeleted.contains(targetId)) {
+        throw const VaultConflict(
+          'Dit onderdeel is definitief verwijderd en kan niet worden teruggezet.',
+        );
+      }
       if (!uuidPattern.hasMatch(targetId) ||
           !entryKinds.contains(kind) ||
           (kind == 'preferences' && (targetId != id || deleted))) {
@@ -451,4 +511,43 @@ class VaultRepository {
     _queue = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
   }
+
+  Future<Entry> permanentlyDelete(Entry entry) => _exclusive(() async {
+    await reload();
+    final current = heads[entry.id]?.singleOrNull;
+    if (current == null ||
+        !current.deleted ||
+        current.kind == 'preferences' ||
+        current.kind == 'purge') {
+      throw const VaultConflict(
+        'Alleen een onderdeel in de prullenbak kan definitief worden verwijderd.',
+      );
+    }
+    if (warnings.isNotEmpty) {
+      throw const VaultConflict('Herstel eerst de onvolledige bestanden.');
+    }
+    final data = <String, dynamic>{
+      'target': entry.id,
+      'kind': entry.kind,
+      'revisions': {
+        for (final r in history.where((r) => r.id == entry.id))
+          r.revision: _fingerprints[r.revision]!,
+      },
+    };
+    final revision = const Uuid().v4();
+    final marker = Entry(
+      id: const Uuid().v4(),
+      revision: revision,
+      parents: [],
+      kind: 'purge',
+      data: data,
+      updated: DateTime.now().toUtc(),
+      created: DateTime.now().toUtc(),
+      actor: actor,
+      crdt: base64Encode(CollaborativeEntry([]).edit(revision, [], data)),
+    );
+    await _publish(marker, marker.encode());
+    await reload();
+    return marker;
+  });
 }

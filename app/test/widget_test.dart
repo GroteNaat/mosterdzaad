@@ -11,6 +11,8 @@ import 'package:mosterdzaad/storage/vault_repository.dart';
 
 import 'helpers.dart';
 
+import 'package:mosterdzaad/ui/notebook.dart';
+
 class TestPicker extends VaultPicker {
   final MemoryFiles memory = MemoryFiles();
   bool cancel = false;
@@ -81,6 +83,16 @@ void main() {
       await tester.tap(find.text('Locatie kiezen'));
       await tester.pumpAndSettle();
       expect(app.repository?.name, 'Mijn studieboek');
+      await tester.scrollUntilVisible(
+        find.text('Nieuwe notitie').first,
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byType(PageBody),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       await tester.tap(find.text('Nieuwe notitie').first);
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -129,6 +141,16 @@ void main() {
       );
       await tester.pumpWidget(MosterdzaadApp(app));
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Nieuwe notitie').first,
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byType(PageBody),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       await tester.tap(find.text('Nieuwe notitie').first);
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -248,6 +270,12 @@ void main() {
         find.widgetWithText(TextFormField, 'Titel'),
         'Een week in de Psalmen',
       );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Aantal dagen / sessies'),
+        '3',
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Sessie 1'));
       await tester.tap(find.text('Sessie 1'));
       await tester.pumpAndSettle();
       await tester.enterText(

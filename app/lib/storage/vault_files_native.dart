@@ -51,6 +51,11 @@ class LocalVaultFiles implements VaultFiles {
   @override
   Future<void> makeDirectory(String name) =>
       Directory(path(name)).create().then((_) {});
+  @override
+  Future<void> remove(String name) async {
+    final file = File(path(name));
+    if (await file.exists()) await file.delete();
+  }
 }
 
 class NativeVaultFiles implements VaultFiles {
@@ -77,6 +82,8 @@ class NativeVaultFiles implements VaultFiles {
       call<void>('writeNew', name, contents);
   @override
   Future<void> makeDirectory(String name) => call<void>('makeDirectory', name);
+  @override
+  Future<void> remove(String name) => call<void>('remove', name);
 }
 
 class VaultPicker {

@@ -33,6 +33,8 @@ class _DeferredFiles implements VaultFiles {
   @override
   Future<void> makeDirectory(String name) async =>
       (await files).makeDirectory(name);
+  @override
+  Future<void> remove(String name) async => (await files).remove(name);
 }
 
 class RecentVaultStore {

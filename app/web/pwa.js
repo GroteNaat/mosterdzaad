@@ -1,13 +1,14 @@
 if ('serviceWorker' in navigator && window.isSecureContext) {
-  const report = message => {
+  const report = (message, transient = false) => {
     const banner = document.createElement('div');
     banner.setAttribute('role', 'status');
-    banner.style.cssText = 'position:fixed;bottom:8px;left:8px;right:8px;z-index:9999;padding:12px;background:#f0f2e8;color:#263725;border:1px solid #526c49;border-radius:8px;font:14px system-ui;display:flex;gap:12px;align-items:center';
+    banner.style.cssText = 'position:fixed;bottom:max(12px,env(safe-area-inset-bottom));right:12px;max-width:440px;box-sizing:border-box;width:calc(100% - 24px);z-index:9999;padding:12px;background:#f0f2e8;color:#263725;border:1px solid #526c49;border-radius:8px;font:14px system-ui;display:flex;gap:12px;align-items:center';
     const label = document.createElement('span');
     label.style.flex = '1'; label.textContent = message;
     const close = document.createElement('button'); close.textContent = 'Sluiten';
     close.onclick = () => banner.remove();
     banner.append(label, close); document.body.append(banner);
+    if (transient) setTimeout(() => banner.remove(), 6000);
   };
   navigator.serviceWorker.register('service_worker.js', {updateViaCache: 'none'})
     .then(registration => {
@@ -18,7 +19,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
         worker.addEventListener('statechange', () => {
           if (worker.state === 'installed') {
             if (navigator.serviceWorker.controller) ready();
-            else report('Mosterdzaad is klaar voor offline gebruik.');
+            else report('Mosterdzaad is klaar voor offline gebruik.', true);
           }
         });
       });

@@ -1,7 +1,7 @@
 [Setup]
 AppId={{324A1174-61F6-4E79-A197-CBB409057A19}
 AppName=Mosterdzaad
-AppVersion=0.2.0
+AppVersion=0.4.0
 AppPublisher=Mosterdzaad
 DefaultDirName={localappdata}\Programs\Mosterdzaad
 DefaultGroupName=Mosterdzaad

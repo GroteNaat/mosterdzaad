@@ -14,11 +14,11 @@ Op iPhone/iPad is de eigen documentmap zichtbaar in Bestanden. Studieboeken binn
 
 - Notities met meerdere passages, thema’s, leesplannen en studies.
 - Bijbeltracker met hoofdstuk- en versoverzichten; overlap telt één keer.
-- Leesplannen met 1–366 bewerkbare sessies en overdenkingen.
+- Leesplannen met een zelfgekozen aantal van 1–366 sessies. Een sessie is afgerond zodra er een notitie aan gekoppeld is; het overzicht toont alle nog lopende plannen.
 - Bijbelstudies met datum en persoonlijke groepslabels.
 - Zoeken op tekst, verwijzingen en gekoppelde onderdelen.
 - Eerdere versies, prullenbak, automatische tekstsamenvoeging en zichtbare metadata-alternatieven.
-- Nederlandse interface die zich aanpast aan telefoon en desktop.
+- Nederlandse interface met een vaste groene zijbalk op brede schermen, een overzicht per Bijbelboek en laatste gedachten naast je leesplannen.
 
 Er worden geen Bijbelteksten meegeleverd. De hoofdstuk- en versmetadata zijn dezelfde als in de oorspronkelijke app. Een vers telt mee als er een niet-lege notitie aan gekoppeld is. De versindeling staat vast zodra er passages in de geschiedenis voorkomen.
 
@@ -27,6 +27,8 @@ Er worden geen Bijbelteksten meegeleverd. De hoofdstuk- en versmetadata zijn dez
 Alle inhoud en eerdere versies staan in de gekozen studieboekmap. De gegevens zijn leesbare Markdown/JSON-records in een duurzaam lokaal wijzigingenlogboek. Een SQLite/Drift-zoekindex in de lokale appcache is afgeleid van deze bestanden. Verwijderen van de cache verwijdert geen notities.
 
 Maak regelmatig een kopie van **de volledige studieboekmap**. In de PWA staan de records in IndexedDB en kun je een reservekopie downloaden en herstellen. Browseropslag blijft afhankelijk van je browser en kan worden gewist.
+
+**Definitief verwijderen** bij Instellingen → Herstel en geschiedenis wist ook de lokale revisies en werkt bij de volgende synchronisatie door naar gekoppelde apparaten en de actieve Dropbox-bestanden en herstelpunten. Dropbox kan zelf nog herstelkopieën bewaren; die moet je in Dropbox definitief verwijderen. Zelf geëxporteerde kopieën en systeemback-ups vallen buiten de app. Werk alle apparaten bij naar versie 0.4.0 of hoger voordat je deze functie gebruikt. Zie [de wisprocedure en grenzen](app/docs/STORAGE.md#definitief-verwijderen).
 
 Bij **Instellingen → Dropbox-synchronisatie en back-up** koppel je je eigen Dropbox en stel je een versleutelingswachtwoord in. Wijzigingen worden vóór upload versleuteld en afzonderlijk verstuurd. Op een tweede apparaat gebruik je **Uit Dropbox openen** en hetzelfde wachtwoord. Tekstwijzigingen worden met Loro samengevoegd; metadata-alternatieven blijven beschikbaar. Er zijn afzonderlijke versleutelde herstelpunten. Zie [Dropbox instellen](app/docs/DROPBOX.md) en [protocol en vrijgavevoorwaarden](app/docs/ENCRYPTED-SYNC.md).
 
@@ -71,4 +73,4 @@ De PWA-build bevat een manifest, iconen en een service worker. De workflow lever
 
 ## Licenties
 
-Applicatiecode: [MIT](LICENSE), copyright NathanH. Bijbelmetadata: **CC BY-SA 4.0**, met bronvermelding in [DATA-SOURCES.md](app/assets/data/DATA-SOURCES.md). Roboto: [Apache 2.0](app/assets/fonts/roboto_license.txt). De app toont de afhankelijkheidslicenties onder Instellingen.
+Applicatiecode: [MIT](LICENSE), copyright NathanH. Bijbelmetadata: **CC BY-SA 4.0**, met bronvermelding in [DATA-SOURCES.md](app/assets/data/DATA-SOURCES.md). Roboto: [Apache 2.0](app/assets/fonts/roboto_license.txt). Lora: [SIL Open Font License](app/assets/fonts/lora_license.txt). Beide lettertypen zijn lokaal meegeleverd. De app toont de afhankelijkheidslicenties onder Instellingen.

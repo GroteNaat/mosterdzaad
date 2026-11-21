@@ -1,20 +1,54 @@
 import 'package:material_ui/material_ui.dart';
 
-const sage = Color(0xFF526C49);
+const sage = Color(0xFF4F694B);
+const ink = Color(0xFF293E32);
+const muted = Color(0xFF697565);
+const paper = Color(0xFFF8F7F2);
+const sidebarGreen = Color(0xFFEDF0E4);
+const softGreen = Color(0xFFE8EEDC);
+const gold = Color(0xFFAF8C4D);
+const editorial = TextStyle(fontFamily: 'Lora', color: ink, height: 1.25);
 ThemeData appTheme() => ThemeData(
   fontFamily: 'Roboto',
   useMaterial3: true,
-  colorScheme: ColorScheme.fromSeed(
-    seedColor: sage,
-    surface: const Color(0xFFF9F8F3),
+  textTheme: const TextTheme(
+    headlineLarge: TextStyle(
+      fontFamily: 'Lora',
+      fontSize: 38,
+      color: ink,
+      height: 1.2,
+    ),
+    headlineMedium: TextStyle(
+      fontFamily: 'Lora',
+      fontSize: 30,
+      color: ink,
+      height: 1.3,
+    ),
+    headlineSmall: TextStyle(fontFamily: 'Lora', fontSize: 25, color: ink),
+    titleLarge: TextStyle(
+      fontFamily: 'Lora',
+      fontSize: 22,
+      color: ink,
+      height: 1.3,
+    ),
+    bodyLarge: TextStyle(fontSize: 16, height: 1.6, color: ink),
+    bodyMedium: TextStyle(fontSize: 14, height: 1.5, color: ink),
+    bodySmall: TextStyle(fontSize: 12, height: 1.45, color: muted),
   ),
-  scaffoldBackgroundColor: const Color(0xFFF9F8F3),
+  colorScheme: ColorScheme.fromSeed(seedColor: sage, surface: paper),
+  scaffoldBackgroundColor: paper,
   appBarTheme: const AppBarTheme(
     backgroundColor: Color(0xFFF9F8F3),
     surfaceTintColor: Colors.transparent,
   ),
   inputDecorationTheme: const InputDecorationTheme(
-    border: OutlineInputBorder(),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(12)),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(12)),
+      borderSide: BorderSide(color: Color(0xFFD4DCCB)),
+    ),
     filled: true,
     fillColor: Colors.white,
     alignLabelWithHint: true,
@@ -22,14 +56,16 @@ ThemeData appTheme() => ThemeData(
   cardTheme: CardThemeData(
     color: Colors.white,
     elevation: 0,
+    margin: const EdgeInsets.only(bottom: 12),
     shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(16),
       side: const BorderSide(color: Color(0xFFE0E4D8)),
     ),
   ),
   filledButtonTheme: FilledButtonThemeData(
     style: FilledButton.styleFrom(
       minimumSize: const Size(48, 48),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
     ),
   ),
@@ -81,7 +117,7 @@ class PageHeading extends StatelessWidget {
             Text(
               title,
               style: Theme.of(context).textTheme.headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
+                  ?.copyWith(fontWeight: FontWeight.w400),
             ),
             const SizedBox(height: 6),
             Text(subtitle),

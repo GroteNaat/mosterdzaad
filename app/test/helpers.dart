@@ -28,6 +28,8 @@ class MemoryFiles implements VaultFiles {
   final contents = <String, String>{};
   final directories = <String>{};
   bool failWrite = false, denied = false;
+  int removals = 0;
+  int? failRemoveAt;
   @override
   VaultLocation get location =>
       const VaultLocation('memory', 'memory', 'Mijn studieboek');
@@ -49,6 +51,14 @@ class MemoryFiles implements VaultFiles {
   Future<String?> read(String name) async {
     if (denied) throw const FileSystemException('Toegang ingetrokken');
     return contents[name];
+  }
+
+  @override
+  Future<void> remove(String name) async {
+    if (++removals == failRemoveAt) {
+      throw const FileSystemException('Verwijderen onderbroken');
+    }
+    contents.remove(name);
   }
 
   @override

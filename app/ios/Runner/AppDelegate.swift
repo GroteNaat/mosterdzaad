@@ -110,6 +110,8 @@ enum AppleVaultFiles {
             guard values.isSymbolicLink != true, (values.fileSize ?? 0) <= 8 * 1024 * 1024 else { throw CocoaError(.fileReadCorruptFile) }
             output = try String(contentsOf: url, encoding: .utf8)
           }
+        case "remove":
+          if fm.fileExists(atPath: url.path) { try fm.removeItem(at: url) }
         case "writeNew":
           guard let text = args["contents"] as? String else { throw CocoaError(.fileWriteUnknown) }
           try Data(text.utf8).write(to: url, options: .withoutOverwriting)

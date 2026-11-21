@@ -113,4 +113,10 @@ class BrowserVaultFiles implements VaultFiles {
 
   @override
   Future<void> makeDirectory(String name) async => checkRelative(name);
+  @override
+  Future<void> remove(String name) async {
+    final tx = db.database.transaction('files', idbModeReadWrite);
+    await tx.objectStore('files').delete(_key(name));
+    await tx.completed;
+  }
 }

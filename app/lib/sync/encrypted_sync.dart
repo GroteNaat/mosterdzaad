@@ -31,6 +31,7 @@ class SyncJournal {
   final acknowledged =
       <String, String>{}; // operation -> canonical plaintext hash
   final outbox = <String, String>{}; // exact ciphertext persisted before upload
+  final erasedOperations = <String, String>{};
   final verifiedSnapshots = <String, Map<String, dynamic>>{};
   Map<String, dynamic> toJson() => {
     'version': 2,
@@ -48,6 +49,7 @@ class SyncJournal {
     'objects': {for (final e in objects.entries) e.key: e.value.toJson()},
     'acknowledged': acknowledged,
     'outbox': outbox,
+    'erasedOperations': erasedOperations,
     'verifiedSnapshots': verifiedSnapshots,
   };
   factory SyncJournal.decode(String source) {
@@ -72,6 +74,9 @@ class SyncJournal {
       )
       ..acknowledged.addAll(Map<String, String>.from(j['acknowledged'] as Map))
       ..outbox.addAll(Map<String, String>.from(j['outbox'] as Map))
+      ..erasedOperations.addAll(
+        Map<String, String>.from(j['erasedOperations'] as Map? ?? {}),
+      )
       ..verifiedSnapshots.addAll(
         (j['verifiedSnapshots'] as Map? ?? {}).map(
           (k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map)),
@@ -318,6 +323,17 @@ class EncryptedSync {
       }
     }
     VaultSnapshot? merged = local;
+    final observed = <String, Entry>{};
+    void observe(VaultSnapshot snapshot) {
+      for (final e in snapshot.contents.entries.where(
+        (e) => e.key.startsWith('records/'),
+      )) {
+        final record = Entry.decode(e.value, e.key.split('/').last);
+        observed[record.revision] = record;
+      }
+    }
+
+    if (local != null) observe(local);
     final covered = <String, String>{};
     // Union all valid retained snapshots: creation clocks do not select state.
     // A snapshot may have been produced by a formerly offline device.
@@ -345,6 +361,7 @@ class EncryptedSync {
       if (!uuidPattern.hasMatch(id)) continue;
       try {
         final point = await readPoint(journal.dataset, id, key);
+        observe(point.snapshot);
         merged = merged == null ? point.snapshot : merged.union(point.snapshot);
         covered.addAll(point.covered);
         journal.verifiedSnapshots[item.path] = {
@@ -394,6 +411,7 @@ class EncryptedSync {
       final name = change['filename'] as String,
           text = change['record'] as String;
       final record = Entry.decode(text, name);
+      observed[record.revision] = record;
       if (record.revision != op) {
         throw const FormatException('Verwisselde wijziging.');
       }
@@ -411,20 +429,29 @@ class EncryptedSync {
       files[path] = text;
       received[op] = hash;
     }
+    final result = VaultSnapshot(files);
+    final validated = await result.validate(bible);
+    final erasedIds = validated.permanentlyDeleted;
+    final erased = {
+      ...journal.erasedOperations,
+      ...purgedRevisions(validated.history),
+      for (final e in observed.values.where((e) => erasedIds.contains(e.id)))
+        e.revision: e.fileFingerprint!,
+    };
     // Detect rollback/deletion of previously confirmed history unless a valid
     // retained snapshot still contains it. Local data alone is not proof of
     // a surviving remote backup.
     for (final op in journal.acknowledged.keys) {
       if (!candidate.containsKey(changePath(journal.dataset, op)) &&
+          erased[op] != journal.acknowledged[op] &&
           covered[op] != journal.acknowledged[op]) {
         throw const FormatException(
           'Dropbox mist eerder bevestigde geschiedenis. Er wordt niets overschreven; controleer de herstelpunten.',
         );
       }
     }
-    final result = VaultSnapshot(files);
-    await result.validate(bible);
     result.encode();
+    journal.erasedOperations.addAll(erased);
     // In-memory only until the caller has durably merged the validated batch.
     journal.cursor = cursor;
     journal.objects
@@ -445,6 +472,10 @@ class EncryptedSync {
     final local = await repo.snapshot();
     final remote = await receive(journal, key, local: local);
     if (remote != null) await repo.mergeSnapshot(remote);
+    journal.erasedOperations.addAll(purgedRevisions(repo.history));
+    journal.outbox.removeWhere(
+      (op, _) => journal.erasedOperations.containsKey(op),
+    );
     // A lost upload response can be confirmed by the authenticated download
     // in receive(). Clear its durable retry only after the merge is committed.
     journal.outbox.removeWhere((op, _) => journal.acknowledged.containsKey(op));
@@ -487,6 +518,7 @@ class EncryptedSync {
       journal.operationsSinceBackup++;
       await persist(repo.id, journal);
     }
+    await _cleanErasedHistory(repo, journal, key);
     if (journal.lastBackup == null ||
         journal.operationsSinceBackup >= journal.snapshotEveryOperations ||
         DateTime.now().difference(journal.lastBackup!).inHours >=
@@ -501,6 +533,10 @@ class EncryptedSync {
         'dataset': journal.dataset,
         'envelopeHash': journal.envelopeHash,
         'outbox': journal.outbox,
+        'knownPurges': [
+          for (final e in repo.history.where((e) => e.kind == 'purge'))
+            e.revision,
+        ],
       }),
     );
   }
@@ -511,6 +547,9 @@ class EncryptedSync {
     SecureKey key,
   ) async {
     final snapshot = await repo.snapshot();
+    journal.erasedOperations.addAll(purgedRevisions(repo.history));
+    final live = repo.history.map((e) => e.revision).toSet();
+    journal.outbox.removeWhere((op, _) => !live.contains(op));
     for (final entry in orderedRecords(repo.history)) {
       final text = snapshot.contents['records/${entry.filename}']!;
       if (journal.acknowledged[entry.revision] == digest(utf8.encode(text))) {
@@ -541,11 +580,15 @@ class EncryptedSync {
         'dataset': journal.dataset,
         'envelopeHash': journal.envelopeHash,
         'outbox': journal.outbox,
+        'knownPurges': [
+          for (final e in repo.history.where((e) => e.kind == 'purge'))
+            e.revision,
+        ],
       }),
     );
   }
 
-  Future<void> backup(
+  Future<RestorePoint> backup(
     VaultRepository repo,
     SyncJournal journal,
     SecureKey key,
@@ -579,6 +622,120 @@ class EncryptedSync {
     journal.lastBackup = created;
     journal.operationsSinceBackup = 0;
     await persist(repo.id, journal);
+    return point;
+  }
+
+  /// Erase active Dropbox copies only after a verified, clean checkpoint
+  /// contains every remaining revision. Dropbox's own recovery bin is managed
+  /// by Dropbox and requires their Business-only permanent-delete API.
+  Future<void> _cleanErasedHistory(
+    VaultRepository repo,
+    SyncJournal journal,
+    SecureKey key,
+  ) async {
+    if (repo.permanentlyDeleted.isEmpty) return;
+    // Keep opaque, authenticated erasure barriers after compaction. A mobile
+    // worker without the key must reconcile an unknown barrier in foreground.
+    for (final e in repo.history.where((e) => e.kind == 'purge')) {
+      final path = '${root(journal.dataset)}/erasures/${e.revision}.enc';
+      var object = await cloud.download(path);
+      if (object == null) {
+        try {
+          await cloud.upload(
+            path,
+            crypto.seal(
+              journal.dataset,
+              'erasure',
+              e.revision,
+              wire(e.data),
+              key,
+            ),
+          );
+        } on CloudChanged {
+          // Another device can publish the same proof with a different nonce.
+        }
+        object = await cloud.download(path);
+      }
+      if (object == null ||
+          utf8.decode(
+                crypto.open(
+                  journal.dataset,
+                  'erasure',
+                  e.revision,
+                  object.bytes,
+                  key,
+                ),
+              ) !=
+              canonicalJson(e.data)) {
+        throw const FormatException(
+          'De verwijderbeveiliging in Dropbox kon niet worden gecontroleerd.',
+        );
+      }
+    }
+    final erased = journal.erasedOperations;
+    final changes = journal.objects.values
+        .where(
+          (item) =>
+              item.path.startsWith('${root(journal.dataset)}/changes/') &&
+              erased.containsKey(
+                item.path.split('/').last.replaceFirst('.enc', ''),
+              ),
+        )
+        .toList();
+    final allSnapshots = journal.objects.values
+        .where(
+          (item) => item.path.startsWith('${root(journal.dataset)}/snapshots/'),
+        )
+        .toList();
+    final unverified = allSnapshots.any(
+      (item) =>
+          journal.verifiedSnapshots[item.path]?['revision'] != item.revision,
+    );
+    final snapshots = allSnapshots
+        .where(
+          (item) =>
+              journal.verifiedSnapshots[item.path]?['revision'] ==
+                  item.revision &&
+              (journal.verifiedSnapshots[item.path]?['covered'] as Map? ?? {})
+                  .keys
+                  .any(erased.containsKey),
+        )
+        .toList();
+    void requireComplete() {
+      if (unverified) {
+        throw const FormatException(
+          'Een Dropbox-herstelpunt kon niet worden gecontroleerd. De verwijdering in Dropbox is nog niet volledig afgerond; controleer het beschadigde herstelpunt.',
+        );
+      }
+    }
+
+    if (changes.isEmpty && snapshots.isEmpty) {
+      requireComplete();
+      return;
+    }
+    final clean = await backup(repo, journal, key);
+    for (final item in snapshots) {
+      final coverage = Map<String, String>.from(
+        journal.verifiedSnapshots[item.path]!['covered'] as Map,
+      );
+      if (!coverage.entries.every(
+        (e) => erased[e.key] == e.value || clean.covered[e.key] == e.value,
+      )) {
+        throw const FormatException(
+          'Een herstelpunt bevat nog niet samengevoegde wijzigingen. Probeer het opruimen opnieuw.',
+        );
+      }
+    }
+    // Commit the deletion proof before removing any confirmed remote history.
+    journal.acknowledged.removeWhere((op, _) => erased.containsKey(op));
+    await persist(repo.id, journal);
+    for (final item in [...changes, ...snapshots]) {
+      await cloud.delete(item.path, item.revision);
+      journal.objects.remove(item.path);
+      journal.verifiedSnapshots.remove(item.path);
+      await persist(repo.id, journal);
+    }
+    requireComplete();
   }
 
   Future<RestorePoint> readPoint(

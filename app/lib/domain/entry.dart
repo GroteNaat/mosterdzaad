@@ -4,7 +4,15 @@ import 'package:crypto/crypto.dart';
 
 import 'bible.dart';
 
-const entryKinds = ['note', 'plan', 'study', 'theme', 'group', 'preferences'];
+const entryKinds = [
+  'note',
+  'plan',
+  'study',
+  'theme',
+  'group',
+  'preferences',
+  'purge',
+];
 final uuidPattern = RegExp(
   r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
 );
@@ -154,6 +162,8 @@ void validateData(
   }
 
   switch (kind) {
+    case 'purge':
+      validatePurge(data);
     case 'note':
       text('title', max: 160);
       text('body', required: true);
@@ -173,6 +183,16 @@ void validateData(
           'Koppel je notitie aan een passage, thema, leesplan of studie.',
         );
       }
+      if (data['planSessions'] != null &&
+          (data['planSessions'] is! List ||
+              (data['planSessions'] as List).any(
+                (v) =>
+                    v is! String ||
+                    v.split('/').length != 2 ||
+                    !v.split('/').every(uuidPattern.hasMatch),
+              ))) {
+        throw const FormatException('Ongeldige sessiekoppeling.');
+      }
     case 'plan':
       text('title', required: true, max: 160);
       text('description');
@@ -188,6 +208,17 @@ void validateData(
           throw const FormatException('Ongeldige sessie.');
         }
         refs(s['passages']);
+        if (s['id'] != null &&
+            (s['id'] is! String || !uuidPattern.hasMatch(s['id'] as String))) {
+          throw const FormatException('Ongeldige sessie-ID.');
+        }
+      }
+      final ids = sessions
+          .where((s) => s['id'] != null)
+          .map((s) => s['id'])
+          .toList();
+      if (ids.toSet().length != ids.length) {
+        throw const FormatException('Dubbele sessie-ID.');
       }
     case 'study':
       text('title', required: true, max: 160);
@@ -217,6 +248,40 @@ void validateData(
       throw const FormatException('Onbekend onderdeel.');
   }
 }
+
+/// A permanent deletion keeps only opaque identities and integrity hashes.
+/// It always wins over an offline edit or restore of the same entity ID.
+void validatePurge(Map<String, dynamic> data) {
+  if (data['target'] is! String ||
+      !uuidPattern.hasMatch(data['target'] as String) ||
+      !['note', 'plan', 'study', 'theme', 'group'].contains(data['kind']) ||
+      data['revisions'] is! Map ||
+      (data['revisions'] as Map).isEmpty ||
+      (data['revisions'] as Map).entries.any(
+        (e) =>
+            e.key is! String ||
+            !uuidPattern.hasMatch(e.key as String) ||
+            e.value is! String ||
+            !RegExp(r'^[0-9a-f]{64}$').hasMatch(e.value as String),
+      ) ||
+      data.keys.any((k) => !['target', 'kind', 'revisions'].contains(k))) {
+    throw const FormatException('Ongeldige definitieve verwijdering.');
+  }
+}
+
+Set<String> purgedIds(Iterable<Entry> records) {
+  final ids = <String>{};
+  for (final e in records.where((e) => e.kind == 'purge')) {
+    validatePurge(e.data);
+    ids.add(e.data['target'] as String);
+  }
+  return ids;
+}
+
+Map<String, String> purgedRevisions(Iterable<Entry> records) => {
+  for (final e in records.where((e) => e.kind == 'purge'))
+    ...Map<String, String>.from(e.data['revisions'] as Map),
+};
 
 /// Leaves of the revision graph. Concurrent edits remain separate, never LWW.
 Map<String, List<Entry>> revisionHeads(Iterable<Entry> entries) {

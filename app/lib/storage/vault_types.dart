@@ -19,6 +19,7 @@ abstract interface class VaultFiles {
   Future<String?> read(String name);
   Future<void> writeNew(String name, String contents);
   Future<void> makeDirectory(String name);
+  Future<void> remove(String name);
 }
 
 void checkRelative(String name) {

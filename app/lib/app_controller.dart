@@ -45,6 +45,8 @@ class AppController extends ChangeNotifier {
   SearchIndex? index;
   bool busy = false;
   String? error, notice;
+  Future<bool> Function()? beforeNavigation;
+  final _indexPurges = <String>{};
   DropboxSession? _dropboxSession;
   String? _refreshToken;
   final _secrets = SecretStore();
@@ -265,7 +267,12 @@ class AppController extends ChangeNotifier {
   Future<List<RestorePoint>> restorePoints() async =>
       (await _engine()).restorePoints(_journal!.dataset, _dataKey!);
   Future<void> restorePoint(RestorePoint point) async {
-    await restoreSnapshot(await point.snapshot.separateCopy(bible));
+    if (syncing) {
+      throw const FormatException('Wacht tot de synchronisatie is afgerond.');
+    }
+    await syncNow(rethrowErrors: true);
+    final cleaned = point.snapshot.applyDeletions(await repository!.snapshot());
+    await restoreSnapshot(await cleaned.separateCopy(bible));
     notice = 'Hersteld als afzonderlijk studieboek. Het vorige studieboek en de wijzigingen op je andere apparaten blijven beschikbaar.';
     notifyListeners();
   }
@@ -371,6 +378,7 @@ class AppController extends ChangeNotifier {
     await index?.close();
     index = null;
     repository = repo;
+    _indexPurges.clear();
     error = null;
     notice = null;
     lastSynced = null;
@@ -382,12 +390,13 @@ class AppController extends ChangeNotifier {
     }
     try {
       index = await createSearchIndex(cacheDirectory, repo.id);
-      await index!.rebuild(entries);
+      await rebuildIndex();
     } catch (_) {
       await index?.close();
       index = null;
-      notice =
-          'De zoekindex is niet beschikbaar. Eenvoudig zoeken blijft werken.';
+      notice = repo.permanentlyDeleted.isNotEmpty
+          ? 'Het wissen van de lokale zoekindex is nog niet afgerond. Herstel de toegang tot de appcache en vernieuw het studieboek.'
+          : 'De zoekindex is niet beschikbaar. Eenvoudig zoeken blijft werken.';
     }
     notifyListeners();
     if (resumeSync) {
@@ -451,12 +460,26 @@ class AppController extends ChangeNotifier {
     if (syncEnabled) await syncNow(rethrowErrors: true);
   });
   Future<void> rebuildIndex() async {
+    final erased = repository?.permanentlyDeleted ?? <String>{};
+    final needsErasure = !_indexPurges.containsAll(erased);
     try {
+      if (needsErasure && index == null) {
+        index = await createSearchIndex(cacheDirectory, repository!.id);
+      }
       await index?.rebuild(entries);
+      if (needsErasure) {
+        await index?.compact();
+        _indexPurges.addAll(erased);
+      }
     } catch (_) {
       notice = 'De zoekindex kon niet worden bijgewerkt.';
       await index?.close();
       index = null;
+      if (needsErasure) {
+        throw const FormatException(
+          'Het wissen van de lokale zoekindex is nog niet afgerond. Herstel de toegang tot de appcache en vernieuw het studieboek.',
+        );
+      }
     }
     notifyListeners();
   }
@@ -510,6 +533,28 @@ class AppController extends ChangeNotifier {
         )
         .map((e) => e.id)
         .toSet();
+  }
+
+  Future<void> permanentlyDelete(Entry entry) async {
+    if (syncing) {
+      throw const FormatException('Wacht tot de synchronisatie is afgerond.');
+    }
+    await cancelBackground();
+    await repository!.permanentlyDelete(entry);
+    try {
+      await rebuildIndex();
+    } finally {
+      if (syncEnabled) {
+        await (await _engine()).stage(repository!, _journal!, _dataKey!);
+        requestSync();
+      }
+    }
+    if (syncEnabled) {
+      notice = 'Lokaal definitief verwijderd. De verwijdering in Dropbox wordt bij de volgende synchronisatie afgerond.';
+    } else {
+      notice = 'Het onderdeel en de eerdere lokale revisies zijn definitief verwijderd.';
+    }
+    notifyListeners();
   }
 
   Future<void> closeBook() async {

@@ -2,9 +2,12 @@ import 'dart:convert';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
+import 'package:uuid/uuid.dart';
 
 import '../app_controller.dart';
 import '../domain/entry.dart';
+import '../domain/plan_progress.dart';
 import 'common.dart';
 
 Future<void> editEntry(
@@ -38,7 +41,8 @@ class EntryEditor extends StatefulWidget {
 
 class _SessionFields {
   _SessionFields(Map<String, dynamic> data)
-    : title = TextEditingController(text: data['title'] as String? ?? ''),
+    : id = data['id'] as String? ?? const Uuid().v4(),
+      title = TextEditingController(text: data['title'] as String? ?? ''),
       references = TextEditingController(
         text: data['references'] as String? ?? '',
       ),
@@ -46,6 +50,7 @@ class _SessionFields {
         text: data['reflection'] as String? ?? '',
       );
   final TextEditingController title, references, reflection;
+  final String id;
   void dispose() {
     title.dispose();
     references.dispose();
@@ -58,10 +63,14 @@ class _EntryEditorState extends State<EntryEditor> {
   final fields = <String, TextEditingController>{};
   final links = <String, Set<String>>{};
   final sessions = <_SessionFields>[];
+  final sessionCount = TextEditingController();
+  List<String> planSessions = [];
+  int get activeSessionCount => int.tryParse(sessionCount.text) ?? 0;
   late String studyKind;
   String? group, error;
   bool saving = false, dirty = false, allowPop = false;
   late final AppLifecycleListener lifecycle;
+  late final Future<bool> Function() navigationGuard;
   AppController get app => widget.app;
   String get kind => widget.kind;
   String get label => const {
@@ -97,12 +106,17 @@ class _EntryEditorState extends State<EntryEditor> {
     }
     studyKind = data['kind'] as String? ?? 'solo';
     group = data['group'] as String?;
-    final initialSessions =
-        (data['sessions'] as List? ??
-        List.generate(7, (_) => <String, dynamic>{}));
-    for (final s in initialSessions) {
-      addSession(Map<String, dynamic>.from(s as Map));
+    planSessions = List<String>.from(data['planSessions'] as List? ?? []);
+    final initialSessions = data['sessions'] as List? ?? [];
+    for (var i = 0; i < initialSessions.length; i++) {
+      addSession({
+        ...Map<String, dynamic>.from(initialSessions[i] as Map),
+        if (widget.original != null) 'id': sessionId(widget.original!, i),
+      });
     }
+    if (sessions.isNotEmpty) sessionCount.text = '${sessions.length}';
+    navigationGuard = () async => allowPop || (!saving && await mayLeave());
+    app.beforeNavigation = navigationGuard;
     lifecycle = AppLifecycleListener(
       onExitRequested: () async => saving
           ? AppExitResponse.cancel
@@ -126,7 +140,11 @@ class _EntryEditorState extends State<EntryEditor> {
 
   @override
   void dispose() {
+    if (identical(app.beforeNavigation, navigationGuard)) {
+      app.beforeNavigation = null;
+    }
     lifecycle.dispose();
+    sessionCount.dispose();
     for (final c in fields.values) {
       c.dispose();
     }
@@ -180,14 +198,20 @@ class _EntryEditorState extends State<EntryEditor> {
           'references': field('references').text.trim(),
           'passages': parse(field('references').text),
           for (final e in links.entries) e.key: e.value.toList(),
+          if (planSessions.isNotEmpty)
+            'planSessions': planSessions
+                .where((s) => links['plans']!.contains(s.split('/').first))
+                .toList(),
         });
       case 'plan':
         data.addAll({
           'title': field('title').text.trim(),
           'description': field('description').text,
           'sessions': sessions
+              .take(activeSessionCount)
               .map(
                 (s) => {
+                  'id': s.id,
                   'title': s.title.text.trim(),
                   'references': s.references.text.trim(),
                   'reflection': s.reflection.text,
@@ -216,6 +240,27 @@ class _EntryEditorState extends State<EntryEditor> {
 
   Future<void> save() async {
     if (!form.currentState!.validate()) return;
+    if (kind == 'plan' &&
+        activeSessionCount < sessions.length &&
+        sessions
+            .skip(activeSessionCount)
+            .any(
+              (s) =>
+                  s.title.text.isNotEmpty ||
+                  s.references.text.isNotEmpty ||
+                  s.reflection.text.isNotEmpty ||
+                  (widget.original?.sessions.length ?? 0) > activeSessionCount,
+            )) {
+      if (!await confirm(
+            context,
+            'Leesplan inkorten?',
+            'De sessies na nummer $activeSessionCount worden uit het leesplan verwijderd. Je bestaande notities blijven behouden.',
+            action: 'Inkorten en opslaan',
+          ) ||
+          !mounted) {
+        return;
+      }
+    }
     setState(() {
       saving = true;
       error = null;
@@ -250,7 +295,9 @@ class _EntryEditorState extends State<EntryEditor> {
     },
     child: Scaffold(
       appBar: AppBar(
-        title: Text('${widget.original == null ? 'Nieuwe' : 'Bewerk'} $label'),
+        title: Text(
+          '${widget.original == null ? (['plan', 'theme'].contains(kind) ? 'Nieuw' : 'Nieuwe') : 'Bewerk'} $label',
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -342,10 +389,10 @@ class _EntryEditorState extends State<EntryEditor> {
                   ],
                   if (kind == 'theme' || kind == 'group')
                     input('name', 'Naam', required: true, max: 100),
-                  if (kind == 'theme' || kind == 'plan')
-                    input('description', 'Omschrijving', lines: 3),
                   if (kind == 'study' || kind == 'plan')
                     input('title', 'Titel', required: true, max: 160),
+                  if (kind == 'theme' || kind == 'plan')
+                    input('description', 'Omschrijving', lines: 3),
                   if (kind == 'study') ...[
                     TextFormField(
                       controller: field('date'),
@@ -414,12 +461,43 @@ class _EntryEditorState extends State<EntryEditor> {
                     ],
                   ],
                   if (kind == 'plan') ...[
-                    Text(
-                      '${sessions.length} sessies',
-                      style: Theme.of(context).textTheme.titleLarge,
+                    TextFormField(
+                      controller: sessionCount,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(3),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Aantal dagen / sessies',
+                        hintText: 'Bijvoorbeeld 10',
+                        helperText:
+                            'Kies 1 tot 366. Je kunt dit later aanpassen.',
+                      ),
+                      validator: (value) {
+                        final count = int.tryParse(value ?? '');
+                        return count == null || count < 1 || count > 366
+                            ? 'Vul een aantal van 1 tot 366 in.'
+                            : null;
+                      },
+                      onChanged: (value) {
+                        final count = int.tryParse(value);
+                        setState(() {
+                          dirty = true;
+                          if (count != null && count >= 1 && count <= 366) {
+                            while (sessions.length < count) {
+                              addSession({});
+                            }
+                          }
+                        });
+                      },
                     ),
-                    const SizedBox(height: 12),
-                    for (var i = 0; i < sessions.length; i++)
+                    const SizedBox(height: 22),
+                    for (
+                      var i = 0;
+                      i < activeSessionCount.clamp(0, sessions.length);
+                      i++
+                    )
                       Card(
                         child: ExpansionTile(
                           key: ObjectKey(sessions[i]),
@@ -455,7 +533,7 @@ class _EntryEditorState extends State<EntryEditor> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            if (sessions.length > 1)
+                            if (activeSessionCount > 1)
                               TextButton.icon(
                                 icon: const Icon(Icons.remove_circle_outline),
                                 label: const Text('Sessie verwijderen'),
@@ -468,7 +546,13 @@ class _EntryEditorState extends State<EntryEditor> {
                                       ) &&
                                       mounted) {
                                     setState(() {
-                                      sessions.removeAt(i).dispose();
+                                      final removed = sessions.removeAt(i);
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback(
+                                            (_) => removed.dispose(),
+                                          );
+                                      sessionCount.text =
+                                          (activeSessionCount - 1).toString();
                                       dirty = true;
                                     });
                                   }
@@ -479,10 +563,12 @@ class _EntryEditorState extends State<EntryEditor> {
                       ),
                     const SizedBox(height: 16),
                     OutlinedButton.icon(
-                      onPressed: sessions.length >= 366
+                      onPressed: activeSessionCount >= 366
                           ? null
                           : () => setState(() {
-                              addSession({});
+                              final next = activeSessionCount + 1;
+                              if (sessions.length < next) addSession({});
+                              sessionCount.text = next.toString();
                               dirty = true;
                             }),
                       icon: const Icon(Icons.add),

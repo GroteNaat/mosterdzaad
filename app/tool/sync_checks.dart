@@ -37,6 +37,11 @@ class ProbeFiles implements VaultFiles {
   @override
   Future<String?> read(String name) async => contents[name];
   @override
+  Future<void> remove(String name) async {
+    contents.remove(name);
+  }
+
+  @override
   Future<void> writeNew(String name, String value) async {
     if (contents.containsKey(name)) throw StateError('exists');
     contents[name] = value;
@@ -71,8 +76,10 @@ class ProbeSecrets extends SecretStore {
 
 class ProbeCloud implements EncryptedCloud {
   final objects = <String, CloudObject>{};
+  final deleted = <String>{};
   int sequence = 0, writes = 0, downloads = 0;
   bool offline = false, reset = false, loseResponse = false;
+  bool loseDeleteResponse = false;
   @override
   Future<CloudObject?> download(String path) async {
     if (offline) throw CloudOffline();
@@ -90,6 +97,7 @@ class ProbeCloud implements EncryptedCloud {
     if (objects[path]?.revision != revision) throw CloudChanged();
     final rev = '${++sequence}';
     objects[path] = CloudObject(Uint8List.fromList(bytes), rev);
+    deleted.remove(path);
     writes++;
     if (loseResponse) {
       loseResponse = false;
@@ -111,6 +119,8 @@ class ProbeCloud implements EncryptedCloud {
           (e) => e.key.startsWith('$path/'),
         ))
           CloudItem(e.key, e.value.revision, false, '2026-11-19T00:00:00Z'),
+        for (final name in deleted.where((name) => name.startsWith('$path/')))
+          CloudItem(name, '', true, ''),
       ],
       'cursor-$sequence',
       false,
@@ -119,13 +129,20 @@ class ProbeCloud implements EncryptedCloud {
 
   @override
   Future<void> delete(String path, String revision) async {
+    if (!objects.containsKey(path)) return;
     if (objects[path]?.revision != revision) throw CloudChanged();
     objects.remove(path);
+    deleted.add(path);
     sequence++;
+    if (loseDeleteResponse) {
+      loseDeleteResponse = false;
+      throw CloudOffline();
+    }
   }
 }
 
 Future<void> runSyncChecks(Bible bible, CryptoBox crypto) async {
+  await runPurgeChecks(bible, crypto);
   final cloud = ProbeCloud(), state = ProbeState(), secrets = ProbeSecrets();
   final engine = EncryptedSync(cloud, crypto, state, secrets, bible);
   final a = await VaultRepository.create(
@@ -432,4 +449,191 @@ Future<void> runSyncChecks(Bible bible, CryptoBox crypto) async {
   key.dispose();
   kb.dispose();
   kc.dispose();
+}
+
+Future<void> runPurgeChecks(Bible bible, CryptoBox crypto) async {
+  final cloud = ProbeCloud(), state = ProbeState(), secrets = ProbeSecrets();
+  final engine = EncryptedSync(cloud, crypto, state, secrets, bible);
+  final files = ProbeFiles();
+  final a = await VaultRepository.create(
+    files,
+    bible,
+    'Purge test',
+    'english',
+    false,
+  );
+  Map<String, dynamic> data(String text) => {
+    'title': '',
+    'body': text,
+    'references': 'Psalm 23',
+    'passages': bible
+        .parse('Psalm 23', 'english')
+        .map((p) => p.toJson())
+        .toList(),
+    'themes': <String>[],
+    'plans': <String>[],
+    'studies': <String>[],
+  };
+  final original = await a.save('note', data('DELETE-SECRET-original'));
+  final kept = await a.save('note', data('Keep this other note'));
+  final (initialJournal, key) = await engine.create(
+    a,
+    'a long enough purge password',
+  );
+  var journal = initialJournal;
+  final (offlineJournal, offlineKey, beforePurge) = await engine.unlock(
+    journal.dataset,
+    'a long enough purge password',
+  );
+  final offlineFiles = ProbeFiles();
+  await beforePurge.restoreTo(offlineFiles, bible);
+  final offline = VaultRepository(offlineFiles, bible);
+  await offline.reload();
+  await offline.save(
+    'note',
+    data('DELETE-SECRET-offline-edit'),
+    entityId: original.id,
+    expected: [original.revision],
+  );
+  await engine.stage(offline, offlineJournal, offlineKey);
+  check(
+    await backgroundMayUpload(cloud, journal.dataset, {}),
+    'background uploads allowed before any permanent deletion',
+  );
+  final edit = await a.save(
+    'note',
+    data('DELETE-SECRET-new-version'),
+    entityId: original.id,
+    expected: [original.revision],
+  );
+  await engine.synchronize(a, journal, key);
+  final deleted = await a.save(
+    'note',
+    edit.data,
+    entityId: original.id,
+    expected: [edit.revision],
+    deleted: true,
+  );
+  await a.permanentlyDelete(deleted);
+  check(
+    !files.contents.values.any((s) => s.contains('DELETE-SECRET')),
+    'purge must remove physical local revision payloads',
+  );
+  check(
+    a.ofKind('note').single.id == kept.id,
+    'purge must preserve unrelated notes',
+  );
+  await rejects(
+    () => a.save(
+      'note',
+      original.data,
+      entityId: original.id,
+      expected: [deleted.revision],
+    ),
+    'purge rejects stale restore',
+  );
+  await a.mergeSnapshot(beforePurge);
+  check(
+    !files.contents.values.any((s) => s.contains('DELETE-SECRET')),
+    'old backup must not resurrect purged history',
+  );
+  final restored = await beforePurge
+      .applyDeletions(await a.snapshot())
+      .separateCopy(bible);
+  check(
+    !restored.encode().contains('DELETE-SECRET'),
+    'restoring to new identities must honor permanent deletions',
+  );
+  check(
+    (await restored.validate(bible)).ofKind('note').single.text('body') ==
+        kept.text('body'),
+    'cleaned restore point keeps unrelated data',
+  );
+  await engine.stage(a, journal, key);
+  cloud.loseDeleteResponse = true;
+  await rejects(
+    () => engine.synchronize(a, journal, key),
+    'interrupted remote cleanup',
+  );
+  journal = SyncJournal.decode(state.values['book-${a.id}']!);
+  await engine.synchronize(a, journal, key);
+  check(
+    !await backgroundMayUpload(cloud, journal.dataset, {}),
+    'unknown erasure barrier stops a stale background worker',
+  );
+  for (final e in cloud.objects.entries) {
+    final id = e.key.split('/').last.replaceFirst('.enc', '');
+    if (e.key.contains('/changes/')) {
+      final plaintext = utf8.decode(
+        crypto.open(journal.dataset, 'change', id, e.value.bytes, key),
+      );
+      check(
+        !plaintext.contains('DELETE-SECRET'),
+        'purge removes encrypted remote changes',
+      );
+    } else if (e.key.contains('/snapshots/')) {
+      final point = await engine.readPoint(journal.dataset, id, key);
+      check(
+        !point.snapshot.encode().contains('DELETE-SECRET'),
+        'purge removes historical remote snapshots',
+      );
+    }
+  }
+  await engine.synchronize(offline, offlineJournal, offlineKey);
+  check(
+    await backgroundMayUpload(
+      cloud,
+      journal.dataset,
+      offline.history
+          .where((e) => e.kind == 'purge')
+          .map((e) => e.revision)
+          .toSet(),
+    ),
+    'reconciled background worker may send again',
+  );
+  check(
+    offlineJournal.outbox.isEmpty,
+    'offline erased edits leave the outgoing queue',
+  );
+  check(
+    !offlineFiles.contents.values.any((s) => s.contains('DELETE-SECRET')),
+    'offline device removes historical and unpublished erased content',
+  );
+  check(
+    offline.ofKind('note').single.id == kept.id,
+    'offline merge keeps unrelated notes',
+  );
+  journal.cursor = '';
+  await engine.synchronize(a, journal, key);
+  final (_, recoveredKey, recovered) = await engine.unlock(
+    journal.dataset,
+    'a long enough purge password',
+  );
+  check(
+    !recovered.encode().contains('DELETE-SECRET'),
+    'fresh device cannot restore erased content',
+  );
+  recoveredKey.dispose();
+  final backupPath = cloud.objects.keys.firstWhere(
+    (p) => p.contains('/snapshots/'),
+  );
+  final intact = cloud.objects[backupPath]!;
+  cloud.objects[backupPath] = CloudObject(
+    Uint8List.fromList([1, 2, 3]),
+    'damaged',
+  );
+  var incompleteReported = false;
+  try {
+    await engine.synchronize(a, journal, key);
+  } on FormatException catch (error) {
+    incompleteReported = error.message.contains('Dropbox-herstelpunt');
+  }
+  check(
+    incompleteReported,
+    'unverified backup must prevent claiming erasure is complete',
+  );
+  cloud.objects[backupPath] = intact;
+  await engine.synchronize(a, journal, key);
+  offlineKey.dispose();
+  key.dispose();
 }

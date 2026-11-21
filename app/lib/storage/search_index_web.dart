@@ -23,4 +23,5 @@ class SearchIndex {
       .map((e) => e.key)
       .toSet();
   Future<void> close() async => _text.clear();
+  Future<void> compact() async {}
 }

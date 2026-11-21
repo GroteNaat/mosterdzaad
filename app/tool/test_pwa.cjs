@@ -47,7 +47,8 @@ async function main() {
     await page.getByRole('textbox', {name: 'Wat wil je bewaren?'}).fill('Deze notitie blijft offline bestaan.');
     await page.getByRole('textbox', {name: 'Bijbelverwijzingen'}).fill('Johannes 3:16');
     await page.getByRole('button', {name: 'Opslaan', exact: true}).click();
-    await page.getByRole('tab', {name: /Instellingen/}).click();
+    await page.getByRole('heading', {name: 'Nieuwe notitie', exact: true}).waitFor({state: 'hidden'});
+    await page.getByRole('button', {name: 'Instellingen', exact: true}).click();
     await page.getByRole('button', {name: 'Reservekopie downloaden', exact: true}).waitFor();
     await page.waitForFunction(() => !!navigator.serviceWorker.controller);
     const cached = await page.evaluate(async () => {
@@ -71,9 +72,9 @@ async function main() {
     await context.setOffline(true);
     await page.reload();
     await enableSemantics();
-    await page.getByRole('tab', {name: /Instellingen/}).click();
+    await page.getByRole('button', {name: 'Instellingen', exact: true}).click();
     await page.getByRole('button', {name: 'Reservekopie downloaden', exact: true}).waitFor();
-    assert((await page.locator('body').innerText()).includes('Browserproef'));
+    await page.getByRole('textbox', {name: /^Browserproef /}).waitFor();
     await fs.mkdir(previews, {recursive: true});
     await page.screenshot({path: path.join(previews, 'pwa-offline.png')});
     await context.setOffline(false);
@@ -81,9 +82,10 @@ async function main() {
     const chooserEvent = page.waitForEvent('filechooser');
     await page.getByRole('button', {name: 'Reservekopie herstellen', exact: true}).click();
     await (await chooserEvent).setFiles({name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(backup))});
-    await page.getByRole('tab', {name: /Instellingen/}).click();
+    await page.getByRole('button', {name: 'Instellingen', exact: true}).click();
     await page.getByRole('button', {name: 'Reservekopie downloaden', exact: true}).waitFor();
-    assert((await page.locator('body').innerText()).includes('Browserproef'));
+    await page.getByRole('textbox', {name: /^Browserproef /}).waitFor();
+    await page.getByRole('button', {name: 'Overzicht', exact: true}).click();
     // A new service worker must wait rather than discard an unsaved note.
     await page.getByRole('button', {name: 'Nieuwe notitie', exact: true}).first().click();
     await page.getByRole('textbox', {name: 'Wat wil je bewaren?'}).fill('Nog niet opgeslagen concept');
